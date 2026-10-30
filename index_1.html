@@ -1,0 +1,970 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f3d2b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Sod Field Mapper</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/@turf/turf@7.1.0/turf.min.js"></script>
+<style>
+  :root{--green:#1f3d2b;--green2:#2f6b45;--accent:#f2c14e;--bg:#fff;--ink:#1b1b1b;--muted:#6b6b6b;--line:#e3e3e3;--red:#c0392b}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;overscroll-behavior:none;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:var(--ink);-webkit-tap-highlight-color:transparent}
+  #map{position:absolute;inset:0}
+  header{position:absolute;top:0;left:0;right:0;z-index:1000;display:flex;align-items:center;gap:8px;padding:calc(env(safe-area-inset-top) + 8px) 10px 8px;background:linear-gradient(rgba(20,40,28,.92),rgba(20,40,28,.75));color:#fff}
+  header h1{font-size:16px;margin:0;font-weight:650;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #syncDot{width:10px;height:10px;border-radius:50%;background:#999;flex:none}
+  #syncDot.ok{background:#4cd964}#syncDot.pending{background:var(--accent)}#syncDot.err{background:#ff5b4f}
+  .hbtn{background:rgba(255,255,255,.14);border:0;color:#fff;border-radius:8px;padding:7px 10px;font-size:14px;cursor:pointer}
+  #toolbar{position:absolute;left:0;right:0;bottom:0;z-index:1000;padding:8px 8px calc(env(safe-area-inset-bottom) + 8px);display:flex;gap:6px;justify-content:center;flex-wrap:wrap;pointer-events:none}
+  #toolbar>*{pointer-events:auto}
+  .btn{border:0;border-radius:12px;padding:12px 14px;font-size:15px;font-weight:600;background:#fff;color:var(--ink);box-shadow:0 2px 8px rgba(0,0,0,.25);cursor:pointer;min-height:46px}
+  .btn.primary{background:var(--green2);color:#fff}.btn.warn{background:var(--red);color:#fff}.btn.accent{background:var(--accent)}
+  .btn:disabled{opacity:.45}
+  .btn.rec{background:var(--red);color:#fff;animation:pulse 1.4s infinite}
+  @keyframes pulse{50%{box-shadow:0 0 0 6px rgba(192,57,43,.25)}}
+  #drawInfo{position:absolute;top:calc(env(safe-area-inset-top) + 54px);left:50%;transform:translateX(-50%);z-index:1000;background:rgba(0,0,0,.72);color:#fff;padding:8px 12px;border-radius:10px;font-size:14px;text-align:center;display:none;max-width:92vw}
+  #drawInfo b{color:var(--accent)}
+  #gpsInfo{font-size:12px;opacity:.85}
+  .sheet{position:fixed;visibility:hidden;left:0;right:0;bottom:0;z-index:1100;background:var(--bg);border-radius:16px 16px 0 0;box-shadow:0 -4px 20px rgba(0,0,0,.3);max-height:82vh;overflow:auto;padding:14px 16px calc(env(safe-area-inset-bottom) + 16px);transform:translateY(105%);transition:transform .22s ease,visibility 0s .22s}
+  .sheet.open{transform:none;visibility:visible;transition:transform .22s ease}
+  @media(min-width:800px){.sheet{left:auto;right:12px;bottom:12px;top:calc(env(safe-area-inset-top) + 60px);width:400px;border-radius:14px;max-height:none}}
+  .sheet h2{margin:0 0 10px;font-size:18px;display:flex;align-items:center;justify-content:space-between}
+  .x{background:none;border:0;font-size:24px;line-height:1;cursor:pointer;color:var(--muted)}
+  label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+  input,select,textarea{width:100%;font-size:16px;padding:10px;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--ink);font-family:inherit}
+  textarea{min-height:64px}
+  .row{display:flex;gap:8px}.row>*{flex:1}
+  .actions{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}.actions .btn{flex:1;box-shadow:none;border:1px solid var(--line)}
+  .acres{font-size:28px;font-weight:700;color:var(--green2)}
+  .muted{color:var(--muted);font-size:13px}
+  .list{list-style:none;margin:8px 0 0;padding:0}
+  .list li{padding:10px 4px;border-bottom:1px solid var(--line);cursor:pointer;display:flex;gap:10px;align-items:center}
+  .list li:hover{background:#f6f6f6}
+  .sw{width:14px;height:14px;border-radius:4px;flex:none;border:1px solid rgba(0,0,0,.2)}
+  .li-main{flex:1;min-width:0}.li-main div:first-child{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .summary{width:100%;border-collapse:collapse;font-size:14px;margin-top:6px}.summary td{padding:4px 2px;border-bottom:1px solid var(--line)}.summary td:last-child{text-align:right;font-variant-numeric:tabular-nums}
+  .vtx{width:18px;height:18px;margin:-9px 0 0 -9px;border-radius:50%;background:#fff;border:3px solid var(--accent);box-shadow:0 1px 4px rgba(0,0,0,.5)}
+  .vtx.first{border-color:#4cd964}.vtx.sel{background:var(--red);border-color:#fff;width:24px;height:24px;margin:-12px 0 0 -12px}
+  .mid{width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;background:rgba(255,255,255,.75);border:2px solid var(--accent)}
+  .me{width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;background:#2a7cff;border:3px solid #fff;box-shadow:0 0 0 2px rgba(42,124,255,.4)}
+  .cross{position:absolute;left:50%;top:50%;width:34px;height:34px;margin:-17px 0 0 -17px;z-index:900;pointer-events:none;display:none}
+  .cross:before,.cross:after{content:"";position:absolute;background:#fff;box-shadow:0 0 2px #000}
+  .cross:before{left:16px;top:0;width:2px;height:34px}.cross:after{top:16px;left:0;height:2px;width:34px}
+  .flabel{background:rgba(0,0,0,.6);border:0;color:#fff;font-weight:600;font-size:12px;box-shadow:none;padding:2px 6px;border-radius:6px}
+  .flabel:before{display:none}
+  #toast{position:absolute;left:50%;bottom:90px;transform:translateX(-50%);z-index:1300;background:#222;color:#fff;padding:10px 14px;border-radius:10px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw;text-align:center}
+  #toast.show{opacity:1}
+  .bigbtn{display:block;width:100%;margin-top:16px;border:0;border-radius:14px;padding:18px;font-size:19px;font-weight:700;background:var(--green2);color:#fff;cursor:pointer;font-family:inherit}
+  .bigbtn:disabled{opacity:.6}
+  .dropzone{border:2px dashed #b9c9bd;border-radius:12px;padding:18px;text-align:center;background:#f6faf7}
+  .dropzone.hover{background:#e3f1e7;border-color:var(--green2)}
+  #dropOverlay{position:fixed;inset:0;z-index:1400;background:rgba(31,61,43,.55);display:none;align-items:center;justify-content:center;pointer-events:none}
+  #dropOverlay div{background:#fff;padding:18px 24px;border-radius:14px;font-weight:700;font-size:18px;box-shadow:0 6px 30px rgba(0,0,0,.35)}
+  #dropOverlay.on{display:flex}
+  .pin{width:26px;height:26px;margin:-26px 0 0 -13px}
+  .pinpop{min-width:180px;font-size:13px}.pinpop img{width:200px;max-width:60vw;border-radius:8px;display:block;margin-bottom:6px}
+  .pinpop .btn{padding:8px 10px;min-height:0;font-size:13px;box-shadow:none;border:1px solid var(--line);margin:6px 4px 0 0}
+  .seg{display:flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}.seg button{flex:1;border:0;background:#fff;padding:9px;font-size:14px;cursor:pointer}.seg button.on{background:var(--green2);color:#fff}
+  details{margin-top:10px}summary{cursor:pointer;font-weight:600}
+  code{background:#f2f2f2;padding:1px 4px;border-radius:4px;font-size:12px;word-break:break-all}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="cross" id="cross"></div>
+
+<header>
+  <span id="syncDot" title="Sync status"></span>
+  <h1 id="title">Sod Field Mapper</h1>
+  <button class="hbtn" id="btnFind">🔍 Find</button>
+  <button class="hbtn" id="btnList">Fields</button>
+  <button class="hbtn" id="btnMenu">☰</button>
+</header>
+
+<div id="drawInfo"><div id="drawText"></div><div id="gpsInfo"></div></div>
+
+<div id="toolbar"></div>
+
+<!-- Field details / save form -->
+<div class="sheet" id="sheetForm">
+  <h2><span id="formTitle">Save field</span><button class="x" data-close>×</button></h2>
+  <div class="acres" id="formAcres">0.00 ac</div>
+  <div class="muted" id="formMeta"></div>
+  <label>Farm</label>
+  <input id="fFarm" list="farmList" autocomplete="off" placeholder="e.g. Crossroads Sod Farm">
+  <datalist id="farmList"></datalist>
+  <div class="row">
+    <div><label>Field name / #</label><input id="fName" placeholder="e.g. Field 7"></div>
+    <div><label>Status</label>
+      <select id="fStatus"><option>In production</option><option>Newly planted</option><option>Harvested</option><option>Fallow</option><option>Planned</option></select></div>
+  </div>
+  <label>Grass</label>
+  <select id="fGrass"></select>
+  <input id="fGrassOther" placeholder="Other grass name" style="display:none;margin-top:6px">
+  <label>Notes</label>
+  <textarea id="fNotes" placeholder="Anything worth knowing (licensing, planting date, issues)"></textarea>
+  <div class="actions">
+    <button class="btn primary" id="btnSave">Save</button>
+    <button class="btn" id="btnEditShape">Edit boundary</button>
+  </div>
+  <div class="actions">
+    <button class="btn" id="btnZoomTo">Zoom to</button>
+    <button class="btn" id="btnExportOne">📤 Share field boundary</button>
+    <button class="btn warn" id="btnDelete">Delete</button>
+  </div>
+</div>
+
+<!-- Field list -->
+<div class="sheet" id="sheetList">
+  <h2>Fields <button class="x" data-close>×</button></h2>
+  <input id="search" placeholder="Search farm, field, grass…">
+  <table class="summary" id="summary"></table>
+  <ul class="list" id="fieldList"></ul>
+</div>
+
+<!-- Menu / settings -->
+<div class="sheet" id="sheetMenu">
+  <h2>Menu <button class="x" data-close>×</button></h2>
+  <label>Your name (shows as "mapped by")</label>
+  <input id="sUser" placeholder="e.g. Tommy">
+  <details id="syncDetails">
+    <summary>Team sync (Google Sheet)</summary>
+    <label>Sync URL (Apps Script web app)</label>
+    <input id="sUrl" placeholder="https://script.google.com/macros/s/…/exec">
+    <label>Team key</label>
+    <input id="sKey" placeholder="shared password">
+    <div class="actions">
+      <button class="btn primary" id="btnSaveSettings">Save &amp; sync now</button>
+      <button class="btn" id="btnInvite">Copy invite link</button>
+    </div>
+    <div class="muted" id="syncStatus" style="margin-top:8px"></div>
+  </details>
+  <label>GPS recording</label>
+  <div class="row">
+    <div><span class="muted">Drop a point every</span>
+      <select id="sSpacing"><option value="2">2 m</option><option value="3" selected>3 m</option><option value="5">5 m</option><option value="10">10 m</option></select></div>
+    <div><span class="muted">Ignore fixes worse than</span>
+      <select id="sAcc"><option value="5">5 m</option><option value="10" selected>10 m</option><option value="15">15 m</option><option value="25">25 m</option></select></div>
+  </div>
+  <label>Share</label>
+  <div class="actions"><button class="btn primary" id="btnMenuExport">📤 Share field boundaries</button></div>
+  <label>Map</label>
+  <div class="seg" id="labelsSeg"><button data-v="1" class="on">Roads &amp; labels on</button><button data-v="0">Off</button></div>
+  <p class="muted" style="margin-top:14px">Imagery © Esri, Maxar, Earthstar Geographics. Acreage is geodesic (true ground area), shown in US acres. Phone GPS is typically ±3–5 m — trace on imagery for tighter lines and use GPS to confirm edges you can't see.</p>
+</div>
+
+<!-- Find a location -->
+<div class="sheet" id="sheetFind">
+  <h2>Find a location <button class="x" data-close>×</button></h2>
+  <div id="dropZone" class="dropzone">
+    <b>Drop photos here</b><br><span class="muted">or</span><br>
+    <button class="btn primary" id="btnPickPhoto" style="margin-top:6px">Choose photo(s)</button>
+    <input type="file" id="filePhoto" accept="image/*,.heic,.heif" multiple style="display:none">
+  </div>
+  <label>…or paste a Google Maps / Apple Maps link, or coordinates</label>
+  <div class="row" style="align-items:center">
+    <input id="findText" placeholder="35.1234, -79.5678  or  maps link" autocomplete="off" style="flex:4">
+    <button class="btn primary" id="btnFindGo" style="flex:1;box-shadow:none">Go</button>
+  </div>
+  <div class="muted" id="findMsg" style="margin-top:8px"></div>
+  <details>
+    <summary>How to get a location from Google / Apple Maps</summary>
+    <p class="muted"><b>Google Maps (computer):</b> right-click the spot → click the coordinates at the top of the menu (copies them) → paste here.<br>
+    <b>Google Maps (phone):</b> long-press to drop a pin → swipe up → tap the coordinates to copy.<br>
+    <b>Apple Maps (Mac):</b> right-click → Drop Pin → click the pin → copy the coordinates shown, or Share → Copy Link.<br>
+    <b>Apple Maps (iPhone):</b> long-press to drop a pin → swipe up → tap the coordinates to copy.<br>
+    Short share links (maps.app.goo.gl…, maps.apple/p/…) can't be read directly — open the link first, then copy the coordinates or the full address-bar link.</p>
+  </details>
+  <p class="muted">Tip: on a computer you can also drag a photo or link anywhere onto the map, or press Ctrl/⌘+V to paste a link. Pins are temporary (this device only) — they clear when you close the app.</p>
+  <div class="actions"><button class="btn" id="btnClearPins">Clear pins</button></div>
+</div>
+
+<!-- Export -->
+<div class="sheet" id="sheetExport">
+  <h2>Share field boundaries <button class="x" data-close>×</button></h2>
+  <label>Which fields?</label>
+  <select id="exScope"></select>
+  <div class="muted" id="exCount" style="margin-top:6px"></div>
+  <div id="exNameRow" style="display:none"><label>Your name</label><input id="exName" placeholder="So the office knows who sent it"></div>
+  <button class="bigbtn" id="btnEmailOffice">📧 Email to the office</button>
+  <div class="muted" id="exTo" style="text-align:center;margin-top:6px"></div>
+  <button class="btn" id="btnShareOther" style="width:100%;margin-top:14px;box-shadow:none;border:1px solid var(--line)">Send another way…</button>
+  <p class="muted" id="exHint" style="margin-top:10px;text-align:center"></p>
+</div>
+
+<div id="dropOverlay"><div>Drop photo or map link to find it</div></div>
+
+<div id="toast"></div>
+
+<script>
+(() => {
+const SQM_PER_ACRE = 4046.8564224;
+const GRASSES = [
+  "Palmetto St. Augustine","Celebration Bermuda","Celebration Hybrid Bermuda","Empire Zoysia",
+  "Tifway 419 Bermuda","TifTuf Bermuda","Latitude 36 Bermuda","NorthBridge Bermuda","Sola St. Augustine",
+  "Lobo Zoysia","Geo Zoysia","Zeon Zoysia","Centipede","Tall Fescue","Other…"
+];
+const PALETTE = ["#f2c14e","#4cd964","#5ac8fa","#ff9f0a","#ff375f","#bf5af2","#64d2ff","#ffd60a","#30d158","#ff6b6b","#a0e7e5","#ffffff","#e5c07b","#98c379"];
+const grassColor = g => { const i = GRASSES.indexOf(g); if (i >= 0) return PALETTE[i % PALETTE.length]; let h=0; for (const c of (g||"")) h=(h*31+c.charCodeAt(0))>>>0; return PALETTE[h % PALETTE.length]; };
+
+// ---------- storage ----------
+const LS = {
+  get(k, d){ try{ const v = localStorage.getItem("sfm_"+k); return v==null ? d : JSON.parse(v); }catch(e){ return d; } },
+  set(k, v){ try{ localStorage.setItem("sfm_"+k, JSON.stringify(v)); }catch(e){} }
+};
+let settings = Object.assign({user:"", url:"", key:"", spacing:3, acc:10, labels:1}, LS.get("settings", {}));
+// onboarding via invite link: ?sync=...&key=...
+// The invite params stay in the address bar on purpose: an iPhone "Add to Home Screen" app keeps its own
+// storage separate from Safari, so the saved home-screen link must carry the sync settings with it.
+(() => { const q = new URLSearchParams(location.search);
+  if (q.get("sync") && (q.get("sync") !== settings.url || (q.get("key")||"") !== settings.key)) {
+    settings.url = q.get("sync"); settings.key = q.get("key")||""; LS.set("settings", settings);
+    setTimeout(()=>toast("Team sync set up from invite link"), 600); } })();
+
+let fields = LS.get("fields", []);      // all fields, including soft-deleted (deleted:true)
+let outbox = LS.get("outbox", []);      // ids waiting to push
+const saveLocal = () => { LS.set("fields", fields); LS.set("outbox", outbox); };
+const live = () => fields.filter(f => !f.deleted);
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+
+// ---------- map ----------
+const map = L.map("map", {zoomControl:false, maxZoom:21, tap:true}).setView(LS.get("view",[35.2,-79.5]).slice(0,2), LS.get("view",[0,0,7])[2] || 7);
+L.control.zoom({position:"topleft"}).addTo(map);
+L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+  maxZoom:21, maxNativeZoom:19, attribution:"Imagery © Esri, Maxar, Earthstar Geographics"
+}).addTo(map);
+const labels = L.layerGroup([
+  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}", {maxZoom:21, maxNativeZoom:19, opacity:.7}),
+  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", {maxZoom:21, maxNativeZoom:19})
+]);
+if (settings.labels) labels.addTo(map);
+map.on("moveend", () => { const c = map.getCenter(); LS.set("view", [c.lat, c.lng, map.getZoom()]); refreshLabels(); });
+const fieldsLayer = L.layerGroup().addTo(map);
+const drawLayer = L.layerGroup().addTo(map);
+const meLayer = L.layerGroup().addTo(map);
+
+// ---------- helpers ----------
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let toastT; function toast(msg, ms=2600){ const t=$("toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("show"), ms); }
+const round7 = n => Math.round(n*1e7)/1e7;
+function ringFrom(pts){ const r = pts.map(p => [round7(p[1]), round7(p[0])]); r.push(r[0]); return r; } // [lat,lng] -> closed [lng,lat]
+function acresOf(pts){ if (pts.length < 3) return 0; return turf.area(turf.polygon([ringFrom(pts)])) / SQM_PER_ACRE; }
+function perimeterFt(pts){ if (pts.length < 2) return 0; const r = ringFrom(pts); return turf.length(turf.lineString(r), {units:"kilometers"}) * 3280.84; }
+function hasKinks(pts){ if (pts.length < 4) return false; try { return turf.kinks(turf.polygon([ringFrom(pts)])).features.length > 0; } catch(e){ return false; } }
+const fmtAc = a => (a||0).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}) + " ac";
+function openSheet(id){ document.querySelectorAll(".sheet").forEach(s => s.classList.toggle("open", s.id === id)); }
+function closeSheets(){ document.querySelectorAll(".sheet").forEach(s => s.classList.remove("open")); }
+document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => { closeSheets(); if (formCtx && formCtx.fromDraw) {} });
+
+// ---------- render saved fields ----------
+const polyById = {};
+function renderFields(){
+  fieldsLayer.clearLayers();
+  for (const k in polyById) delete polyById[k];
+  for (const f of live()) {
+    if (editing && editing.id === f.id) continue;
+    const c = grassColor(f.grass);
+    const poly = L.polygon(f.coords.map(p => [p[1], p[0]]), {color:c, weight:2.5, fillColor:c, fillOpacity:.18});
+    poly.on("click", e => { if (mode !== "view") return; L.DomEvent.stop(e); openForm(f.id); });
+    poly.bindTooltip(`${esc(f.field || "Field")} · ${(f.acres||0).toFixed(1)} ac`, {permanent:true, direction:"center", className:"flabel"});
+    poly.addTo(fieldsLayer);
+    polyById[f.id] = poly;
+  }
+  refreshLabels();
+  updateFarmList();
+}
+function refreshLabels(){
+  const show = map.getZoom() >= 15;
+  for (const id in polyById) { const p = polyById[id]; show ? p.openTooltip() : p.closeTooltip(); }
+}
+
+// ---------- drawing / editing ----------
+let mode = "view";          // view | draw
+let editing = null;         // {id|null, pts:[[lat,lng]], sel:null|idx, undo:[]}
+const snapshot = () => editing.undo.push(JSON.stringify(editing.pts));
+
+function startDraw(existingId){
+  stopRecording();
+  mode = "draw";
+  if (existingId) {
+    const f = fields.find(x => x.id === existingId);
+    editing = {id: existingId, pts: f.coords.slice(0, -1).map(p => [p[1], p[0]]), sel:null, undo:[]};
+  } else editing = {id:null, pts:[], sel:null, undo:[]};
+  closeSheets(); renderFields(); renderDraw(); renderToolbar();
+}
+function endDraw(){ mode = "view"; editing = null; stopRecording(); drawLayer.clearLayers(); $("drawInfo").style.display = "none"; $("cross").style.display="none"; renderFields(); renderToolbar(); }
+
+function renderDraw(){
+  drawLayer.clearLayers();
+  if (!editing) return;
+  const pts = editing.pts;
+  if (pts.length >= 3) L.polygon(pts, {color:"#f2c14e", weight:3, fillOpacity:.2, interactive:false}).addTo(drawLayer);
+  else if (pts.length === 2) L.polyline(pts, {color:"#f2c14e", weight:3, interactive:false}).addTo(drawLayer);
+  const many = pts.length > 150; // walked boundaries: hide midpoints & thin handles for performance
+  pts.forEach((p, i) => {
+    if (many && i % Math.ceil(pts.length/150) !== 0 && i !== editing.sel) return;
+    const cls = "vtx" + (i===0 ? " first" : "") + (i===editing.sel ? " sel" : "");
+    const m = L.marker(p, {draggable:!recording, icon:L.divIcon({className:"", html:`<div class="${cls}"></div>`, iconSize:[0,0]})});
+    m.on("dragstart", () => snapshot());
+    m.on("drag", e => { pts[i] = [e.latlng.lat, e.latlng.lng]; updateDrawInfo(); });
+    m.on("dragend", () => renderDraw());
+    m.on("click", e => { L.DomEvent.stop(e); editing.sel = (editing.sel === i ? null : i); renderDraw(); renderToolbar(); });
+    m.addTo(drawLayer);
+  });
+  if (!many && !recording && pts.length >= 2) {
+    const n = pts.length >= 3 ? pts.length : 1;
+    for (let i = 0; i < n; i++) {
+      const a = pts[i], b = pts[(i+1) % pts.length];
+      const mid = [(a[0]+b[0])/2, (a[1]+b[1])/2];
+      const m = L.marker(mid, {draggable:true, icon:L.divIcon({className:"", html:`<div class="mid"></div>`, iconSize:[0,0]})});
+      m.on("dragstart", () => { snapshot(); pts.splice(i+1, 0, mid); });
+      m.on("drag", e => { pts[i+1] = [e.latlng.lat, e.latlng.lng]; updateDrawInfo(); });
+      m.on("dragend", () => renderDraw());
+      m.addTo(drawLayer);
+    }
+  }
+  updateDrawInfo();
+}
+function updateDrawInfo(){
+  if (!editing) return;
+  const pts = editing.pts, d = $("drawInfo");
+  d.style.display = "block";
+  let msg;
+  if (recording) msg = `<b>Recording GPS</b> · ${pts.length} pts · ${fmtAc(acresOf(pts))}`;
+  else if (pts.length < 3) msg = pts.length === 0 ? "Tap the field corners on the map, or use <b>GPS</b> to walk/drive the edge" : `Keep tapping corners (${pts.length} so far)`;
+  else msg = `<b>${fmtAc(acresOf(pts))}</b> · ${Math.round(perimeterFt(pts)).toLocaleString()} ft edge · ${pts.length} pts` + (hasKinks(pts) ? `<br><span style="color:#ff8a80">⚠ Boundary crosses itself</span>` : "");
+  $("drawText").innerHTML = msg;
+}
+map.on("click", e => {
+  if (mode !== "draw" || recording) return;
+  if (editing.sel != null) { editing.sel = null; renderDraw(); renderToolbar(); return; }
+  snapshot();
+  editing.pts.push([e.latlng.lat, e.latlng.lng]);
+  renderDraw(); renderToolbar();
+});
+
+// ---------- GPS ----------
+let watchId = null, lastFix = null, recording = false, meMarker = null, accCircle = null, followMe = false;
+function ensureGps(){
+  if (watchId != null) return true;
+  if (!navigator.geolocation) { toast("This browser has no GPS access"); return false; }
+  watchId = navigator.geolocation.watchPosition(onFix, err => {
+    toast(err.code === 1 ? "Location permission denied — allow it in your browser settings" : "GPS error: " + err.message, 4000);
+  }, {enableHighAccuracy:true, maximumAge:0, timeout:20000});
+  return true;
+}
+function onFix(pos){
+  const {latitude:lat, longitude:lng, accuracy} = pos.coords;
+  lastFix = {lat, lng, acc:accuracy, t:Date.now()};
+  if (!meMarker) {
+    meMarker = L.marker([lat,lng], {interactive:false, icon:L.divIcon({className:"", html:'<div class="me"></div>', iconSize:[0,0]})}).addTo(meLayer);
+    accCircle = L.circle([lat,lng], {radius:accuracy, color:"#2a7cff", weight:1, fillOpacity:.1, interactive:false}).addTo(meLayer);
+  } else { meMarker.setLatLng([lat,lng]); accCircle.setLatLng([lat,lng]).setRadius(accuracy); }
+  if (followMe) map.setView([lat,lng], Math.max(map.getZoom(), 17), {animate:false});
+  if (editing) $("gpsInfo").textContent = `GPS ±${accuracy.toFixed(0)} m` + (accuracy > settings.acc ? " — too rough, waiting for better signal" : "");
+  if (recording && editing && accuracy <= settings.acc) {
+    const pts = editing.pts, last = pts[pts.length-1];
+    const dist = last ? map.distance(last, [lat,lng]) : Infinity;
+    if (dist >= settings.spacing) { pts.push([lat,lng]); renderDrawThrottled(); }
+  }
+}
+let rdT = 0; function renderDrawThrottled(){ const now = Date.now(); if (now - rdT > 700) { rdT = now; renderDraw(); } else updateDrawInfo(); }
+function locateMe(){ if (!ensureGps()) return; followMe = true; if (lastFix) map.setView([lastFix.lat,lastFix.lng], Math.max(map.getZoom(),17)); else toast("Finding you…"); setTimeout(()=>followMe=false, 4000); }
+function startRecording(){
+  if (!ensureGps()) return;
+  snapshot(); recording = true; followMe = true; editing.sel = null; editing.usedGps = true;
+  renderDraw(); renderToolbar(); toast("Walk or drive the field edge. Tap Stop when you're back at the start.", 4000);
+}
+function stopRecording(){
+  if (!recording) return;
+  recording = false; followMe = false;
+  if (editing && editing.pts.length > 20) {   // thin noisy GPS track (≈0.4 m tolerance)
+    const before = editing.pts.length;
+    try {
+      const line = turf.lineString(editing.pts.map(p => [p[1], p[0]]));
+      const s = turf.simplify(line, {tolerance:0.000004, highQuality:true});
+      editing.pts = s.geometry.coordinates.map(c => [c[1], c[0]]);
+    } catch(e){}
+    toast(`GPS track saved: ${before} fixes → ${editing.pts.length} points`);
+  }
+  renderDraw(); renderToolbar();
+}
+async function dropPointHere(){
+  if (!ensureGps()) return;
+  if (!lastFix || Date.now() - lastFix.t > 10000) { toast("Waiting for GPS…"); return; }
+  // average fixes for ~3 s for a steadier corner
+  toast("Hold still — averaging GPS…", 3200);
+  const samples = []; const start = Date.now();
+  await new Promise(res => { const iv = setInterval(() => { if (lastFix) samples.push(lastFix); if (Date.now()-start > 3000) { clearInterval(iv); res(); } }, 500); });
+  const good = samples.filter(s => s.acc <= settings.acc * 1.5);
+  const use = good.length ? good : samples;
+  const lat = use.reduce((a,s)=>a+s.lat,0)/use.length, lng = use.reduce((a,s)=>a+s.lng,0)/use.length;
+  const acc = Math.min(...use.map(s=>s.acc));
+  editing.usedGps = true; snapshot(); editing.pts.push([lat,lng]); renderDraw(); renderToolbar();
+  toast(`Corner added (±${acc.toFixed(0)} m)`);
+}
+
+// ---------- toolbar ----------
+function renderToolbar(){
+  const tb = $("toolbar"); tb.innerHTML = "";
+  const add = (label, cls, fn, dis) => { const b = document.createElement("button"); b.className = "btn " + (cls||""); b.innerHTML = label; b.onclick = fn; if (dis) b.disabled = true; tb.appendChild(b); return b; };
+  if (mode === "view") {
+    add("📍", "", locateMe);
+    add("+ New field", "primary", () => startDraw(null));
+    add("Fields", "", () => { renderList(); openSheet("sheetList"); });
+    add("📤 Share", "", () => openExport());
+  } else {
+    const pts = editing.pts;
+    if (recording) { add("■ Stop GPS", "rec", stopRecording); return; }
+    add("📍", "", locateMe);
+    add("● GPS walk", "", startRecording);
+    add("+ Corner here", "", dropPointHere);
+    add("↶ Undo", "", () => { if (editing.undo.length) { editing.pts = JSON.parse(editing.undo.pop()); editing.sel=null; renderDraw(); renderToolbar(); } }, !editing.undo.length);
+    if (editing.sel != null) add("Delete point", "warn", () => { snapshot(); editing.pts.splice(editing.sel,1); editing.sel=null; renderDraw(); renderToolbar(); });
+    add("Done", "primary", finishDraw, pts.length < 3);
+    add("Cancel", "", () => { if (!pts.length || editing.undo.length === 0 || confirmInline("Discard this boundary?")) endDraw(); });
+  }
+}
+// confirm() may be blocked in some webviews; fall back to a double-tap pattern
+let confirmT = 0, confirmMsg = "";
+function confirmInline(msg){ if (confirmMsg === msg && Date.now() - confirmT < 3000) { confirmMsg=""; return true; } confirmMsg = msg; confirmT = Date.now(); toast(msg + " Tap again to confirm."); return false; }
+
+function finishDraw(){
+  if (hasKinks(editing.pts)) toast("Heads up: the boundary crosses itself — acreage may be off. Use Undo or drag points to fix.", 4500);
+  openForm(editing.id, true);
+}
+
+// ---------- form ----------
+let formCtx = null;
+$("fGrass").innerHTML = GRASSES.map(g => `<option>${esc(g)}</option>`).join("");
+$("fGrass").onchange = () => { $("fGrassOther").style.display = $("fGrass").value === "Other…" ? "block" : "none"; };
+function updateFarmList(){ const farms = [...new Set(live().map(f => f.farm).filter(Boolean))].sort(); $("farmList").innerHTML = farms.map(f => `<option value="${esc(f)}">`).join(""); }
+function openForm(id, fromDraw){
+  const f = id ? fields.find(x => x.id === id) : null;
+  formCtx = {id, fromDraw};
+  const pts = fromDraw ? editing.pts : f.coords.slice(0,-1).map(p=>[p[1],p[0]]);
+  const ac = acresOf(pts);
+  $("formTitle").textContent = f ? (f.field || "Field") : "Save new field";
+  $("formAcres").textContent = fmtAc(ac);
+  $("formMeta").textContent = f ? `Last mapped by ${f.mappedBy || "?"} · ${new Date(f.updatedAt).toLocaleString()} · ${f.method||""}` : `${pts.length} points · ${Math.round(perimeterFt(pts)).toLocaleString()} ft edge`;
+  const last = live().sort((a,b)=>b.updatedAt-a.updatedAt)[0];
+  $("fFarm").value = f ? f.farm : (last ? last.farm : "");
+  $("fName").value = f ? f.field : "";
+  const g = f ? f.grass : (last ? last.grass : GRASSES[0]);
+  if (GRASSES.includes(g)) { $("fGrass").value = g; $("fGrassOther").style.display="none"; }
+  else { $("fGrass").value = "Other…"; $("fGrassOther").style.display="block"; $("fGrassOther").value = g || ""; }
+  $("fStatus").value = f ? (f.status || "In production") : "In production";
+  $("fNotes").value = f ? (f.notes || "") : "";
+  $("btnEditShape").style.display = fromDraw ? "none" : "";
+  $("btnDelete").style.display = f ? "" : "none";
+  $("btnZoomTo").style.display = f && !fromDraw ? "" : "none";
+  $("btnExportOne").style.display = f && !fromDraw ? "" : "none";
+  $("btnSave").textContent = fromDraw ? "Save field" : "Save changes";
+  openSheet("sheetForm");
+}
+$("btnSave").onclick = () => {
+  const grass = $("fGrass").value === "Other…" ? $("fGrassOther").value.trim() : $("fGrass").value;
+  if (!$("fFarm").value.trim()) { toast("Add the farm name"); return; }
+  const existing = formCtx.id ? fields.find(x => x.id === formCtx.id) : null;
+  const pts = formCtx.fromDraw ? editing.pts : existing.coords.slice(0,-1).map(p=>[p[1],p[0]]);
+  const rec = Object.assign(existing || {id: uid(), createdAt: Date.now()}, {
+    farm: $("fFarm").value.trim(), field: $("fName").value.trim(), grass, status: $("fStatus").value,
+    notes: $("fNotes").value.trim(), coords: ringFrom(pts), acres: Math.round(acresOf(pts)*100)/100,
+    mappedBy: settings.user || "", updatedAt: Date.now(), deleted: false
+  });
+  if (formCtx.fromDraw) rec.method = editing.usedGps ? "GPS" : (rec.method === "GPS" ? "GPS + edited" : "Traced");
+  if (!existing) fields.push(rec);
+  queue(rec.id);
+  closeSheets();
+  if (formCtx.fromDraw) endDraw(); else renderFields();
+  toast(`Saved ${rec.field || "field"} — ${fmtAc(rec.acres)}`);
+};
+$("btnEditShape").onclick = () => startDraw(formCtx.id);
+$("btnDelete").onclick = () => {
+  if (!confirmInline("Delete this field?")) return;
+  const f = fields.find(x => x.id === formCtx.id); f.deleted = true; f.updatedAt = Date.now(); f.mappedBy = settings.user || f.mappedBy;
+  queue(f.id); closeSheets(); if (mode === "draw") endDraw(); else renderFields(); toast("Field deleted");
+};
+$("btnZoomTo").onclick = () => { const p = polyById[formCtx.id]; if (p) map.fitBounds(p.getBounds(), {maxZoom:18, padding:[40,40]}); closeSheets(); };
+$("btnExportOne").onclick = () => openExport("field:" + formCtx.id);
+
+
+// ---------- list ----------
+function renderList(){
+  const q = $("search").value.trim().toLowerCase();
+  const arr = live().filter(f => !q || [f.farm,f.field,f.grass,f.status,f.mappedBy].join(" ").toLowerCase().includes(q))
+    .sort((a,b) => (a.farm||"").localeCompare(b.farm||"") || (a.field||"").localeCompare(b.field||"", undefined, {numeric:true}));
+  const byGrass = {}; let tot = 0;
+  arr.forEach(f => { byGrass[f.grass] = (byGrass[f.grass]||0) + f.acres; tot += f.acres; });
+  $("summary").innerHTML = Object.entries(byGrass).sort((a,b)=>b[1]-a[1]).map(([g,a]) => `<tr><td><span class="sw" style="display:inline-block;vertical-align:-2px;background:${grassColor(g)}"></span> ${esc(g)}</td><td>${fmtAc(a)}</td></tr>`).join("")
+    + `<tr><td><b>Total (${arr.length} fields)</b></td><td><b>${fmtAc(tot)}</b></td></tr>`;
+  $("fieldList").innerHTML = arr.map(f => `<li data-id="${f.id}"><span class="sw" style="background:${grassColor(f.grass)}"></span><div class="li-main"><div>${esc(f.farm)} — ${esc(f.field||"Field")}</div><div class="muted">${esc(f.grass)} · ${esc(f.status||"")}</div></div><div><b>${(f.acres||0).toFixed(2)}</b></div></li>`).join("")
+    || `<li class="muted">No fields yet. Tap “+ New field”.</li>`;
+  $("fieldList").querySelectorAll("li[data-id]").forEach(li => li.onclick = () => {
+    const p = polyById[li.dataset.id]; if (p) map.fitBounds(p.getBounds(), {maxZoom:18, padding:[40,40]}); openForm(li.dataset.id);
+  });
+}
+$("search").oninput = renderList;
+$("btnList").onclick = () => { renderList(); openSheet("sheetList"); };
+
+// ---------- menu / settings ----------
+$("btnMenu").onclick = () => {
+  $("sUser").value = settings.user; $("sUrl").value = settings.url; $("sKey").value = settings.key;
+  $("sSpacing").value = String(settings.spacing); $("sAcc").value = String(settings.acc);
+  $("syncDetails").open = !settings.url;
+  openSheet("sheetMenu");
+};
+$("sUser").onchange = () => { settings.user = $("sUser").value.trim(); LS.set("settings", settings); };
+$("sSpacing").onchange = () => { settings.spacing = +$("sSpacing").value; LS.set("settings", settings); };
+$("sAcc").onchange = () => { settings.acc = +$("sAcc").value; LS.set("settings", settings); };
+$("btnSaveSettings").onclick = () => { settings.url = $("sUrl").value.trim(); settings.key = $("sKey").value.trim(); settings.user = $("sUser").value.trim(); LS.set("settings", settings); sync(true); };
+$("btnInvite").onclick = async () => {
+  if (!settings.url) { toast("Set the sync URL first"); return; }
+  const link = `${location.origin}${location.pathname}?sync=${encodeURIComponent(settings.url)}&key=${encodeURIComponent(settings.key)}`;
+  try { await navigator.clipboard.writeText(link); toast("Invite link copied — text it to your coworkers"); }
+  catch(e){ $("syncStatus").innerHTML = "Invite link: <code>" + esc(link) + "</code>"; }
+};
+$("labelsSeg").querySelectorAll("button").forEach(b => b.onclick = () => {
+  settings.labels = +b.dataset.v; LS.set("settings", settings);
+  $("labelsSeg").querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b));
+  settings.labels ? labels.addTo(map) : map.removeLayer(labels);
+});
+$("labelsSeg").querySelectorAll("button").forEach(x => x.classList.toggle("on", +x.dataset.v === settings.labels));
+
+// ---------- export file builders ----------
+const slug = s => String(s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"") || "x";
+function download(name, text, type){
+  const blob = new Blob([text], {type}); const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+function toGeoJSON(arr){
+  return JSON.stringify({type:"FeatureCollection", features: arr.map(f => ({type:"Feature",
+    properties:{id:f.id, farm:f.farm, field:f.field, grass:f.grass, status:f.status, acres:f.acres, notes:f.notes, mapped_by:f.mappedBy, updated:new Date(f.updatedAt).toISOString()},
+    geometry:{type:"Polygon", coordinates:[f.coords]}}))}, null, 1);
+}
+function toKML(arr){
+  const x = s => esc(s);
+  const pm = arr.map(f => {
+    const c = grassColor(f.grass).replace("#",""); const abgr = "ff" + c.slice(4,6) + c.slice(2,4) + c.slice(0,2);
+    return `<Placemark><name>${x(f.farm)} - ${x(f.field||"Field")}</name>
+<description>${x(f.grass)} | ${f.acres} ac | ${x(f.status||"")}${f.notes ? " | " + x(f.notes) : ""}</description>
+<Style><LineStyle><color>${abgr}</color><width>2</width></LineStyle><PolyStyle><color>40${abgr.slice(2)}</color></PolyStyle></Style>
+<ExtendedData>${["farm","field","grass","status","acres","notes","mappedBy"].map(k=>`<Data name="${k}"><value>${x(f[k])}</value></Data>`).join("")}</ExtendedData>
+<Polygon><outerBoundaryIs><LinearRing><coordinates>${f.coords.map(c=>c[0]+","+c[1]+",0").join(" ")}</coordinates></LinearRing></outerBoundaryIs></Polygon></Placemark>`;
+  }).join("\n");
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>Sod Fields</name>\n${pm}\n</Document></kml>`;
+}
+function toCSV(arr){
+  const q = v => `"${String(v ?? "").replace(/"/g,'""')}"`;
+  return ["farm,field,grass,status,acres,mapped_by,updated,notes,id"].concat(arr.map(f => [f.farm,f.field,f.grass,f.status,f.acres,f.mappedBy,new Date(f.updatedAt).toISOString(),f.notes,f.id].map(q).join(","))).join("\n");
+}
+// ---- Shapefile writer (Polygon, WGS84) + minimal zip, no libraries ----
+const crcTable = (() => { const t = new Uint32Array(256); for (let n=0;n<256;n++){ let c=n; for (let k=0;k<8;k++) c = c&1 ? 0xEDB88320^(c>>>1) : c>>>1; t[n]=c>>>0; } return t; })();
+function crc32(u8){ let c = 0xFFFFFFFF; for (let i=0;i<u8.length;i++) c = crcTable[(c^u8[i])&0xFF]^(c>>>8); return (c^0xFFFFFFFF)>>>0; }
+function zip(files){ // files: [{name, data:Uint8Array}] — stored (no compression)
+  const enc = new TextEncoder(), parts = [], central = []; let off = 0;
+  const d = new Date(), dt = ((d.getFullYear()-1980)<<9)|((d.getMonth()+1)<<5)|d.getDate(), tm = (d.getHours()<<11)|(d.getMinutes()<<5)|(d.getSeconds()>>1);
+  for (const f of files) {
+    const name = enc.encode(f.name), crc = crc32(f.data), n = f.data.length;
+    const h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0,0x04034b50,true); h.setUint16(4,20,true); h.setUint16(6,0,true); h.setUint16(8,0,true); h.setUint16(10,tm,true); h.setUint16(12,dt,true);
+    h.setUint32(14,crc,true); h.setUint32(18,n,true); h.setUint32(22,n,true); h.setUint16(26,name.length,true); h.setUint16(28,0,true);
+    parts.push(new Uint8Array(h.buffer), name, f.data);
+    const c = new DataView(new ArrayBuffer(46));
+    c.setUint32(0,0x02014b50,true); c.setUint16(4,20,true); c.setUint16(6,20,true); c.setUint16(8,0,true); c.setUint16(10,0,true); c.setUint16(12,tm,true); c.setUint16(14,dt,true);
+    c.setUint32(16,crc,true); c.setUint32(20,n,true); c.setUint32(24,n,true); c.setUint16(28,name.length,true); c.setUint32(42,off,true);
+    central.push(new Uint8Array(c.buffer), name);
+    off += 30 + name.length + n;
+  }
+  const cdSize = central.reduce((a,b)=>a+b.length,0);
+  const e = new DataView(new ArrayBuffer(22));
+  e.setUint32(0,0x06054b50,true); e.setUint16(8,files.length,true); e.setUint16(10,files.length,true); e.setUint32(12,cdSize,true); e.setUint32(16,off,true);
+  return new Blob([...parts, ...central, new Uint8Array(e.buffer)], {type:"application/zip"});
+}
+function toShapefileZip(arr, base){
+  // rings: shapefile outer rings must be clockwise
+  const rings = arr.map(f => { const r = f.coords.map(c => [c[0], c[1]]); let s = 0; for (let i=0;i<r.length-1;i++) s += (r[i+1][0]-r[i][0])*(r[i+1][1]+r[i][1]); return s < 0 ? r.reverse() : r; });
+  const bbox = rs => { let a=[Infinity,Infinity,-Infinity,-Infinity]; rs.forEach(r=>r.forEach(([x,y])=>{ a[0]=Math.min(a[0],x); a[1]=Math.min(a[1],y); a[2]=Math.max(a[2],x); a[3]=Math.max(a[3],y); })); return a; };
+  const all = bbox(rings);
+  const recLens = rings.map(r => 44 + 4 + 16*r.length);          // content bytes
+  const shpLen = 100 + recLens.reduce((a,l)=>a+8+l,0), shxLen = 100 + 8*rings.length;
+  const header = (dv, lenBytes) => { dv.setInt32(0,9994,false); dv.setInt32(24,lenBytes/2,false); dv.setInt32(28,1000,true); dv.setInt32(32,5,true);
+    [all[0],all[1],all[2],all[3]].forEach((v,i)=>dv.setFloat64(36+8*i, isFinite(v)?v:0, true)); };
+  const shp = new DataView(new ArrayBuffer(shpLen)), shx = new DataView(new ArrayBuffer(shxLen));
+  header(shp, shpLen); header(shx, shxLen);
+  let o = 100;
+  rings.forEach((r, i) => {
+    shx.setInt32(100+8*i, o/2, false); shx.setInt32(104+8*i, recLens[i]/2, false);
+    shp.setInt32(o, i+1, false); shp.setInt32(o+4, recLens[i]/2, false); o += 8;
+    const b = bbox([r]);
+    shp.setInt32(o,5,true); b.forEach((v,k)=>shp.setFloat64(o+4+8*k, v, true));
+    shp.setInt32(o+36,1,true); shp.setInt32(o+40,r.length,true); shp.setInt32(o+44,0,true);
+    r.forEach(([x,y],k)=>{ shp.setFloat64(o+48+16*k, x, true); shp.setFloat64(o+56+16*k, y, true); });
+    o += recLens[i];
+  });
+  // DBF (UTF-8 text, declared in .cpg)
+  const enc = new TextEncoder();
+  const defs = [["FARM","C",80],["FIELD","C",60],["GRASS","C",50],["STATUS","C",20],["ACRES","N",12,2],["MAPPED_BY","C",40],["UPDATED","D",8],["NOTES","C",254],["FIELD_ID","C",20]];
+  const recLen = 1 + defs.reduce((a,d)=>a+d[2],0), hdrLen = 32 + 32*defs.length + 1;
+  const dbf = new Uint8Array(hdrLen + recLen*arr.length + 1), dv = new DataView(dbf.buffer), now = new Date();
+  dbf[0]=3; dbf[1]=now.getFullYear()-1900; dbf[2]=now.getMonth()+1; dbf[3]=now.getDate();
+  dv.setUint32(4,arr.length,true); dv.setUint16(8,hdrLen,true); dv.setUint16(10,recLen,true);
+  defs.forEach((d,i)=>{ const p = 32+32*i; enc.encode(d[0]).forEach((b,k)=>dbf[p+k]=b); dbf[p+11]=d[1].charCodeAt(0); dbf[p+16]=d[2]; dbf[p+17]=d[3]||0; });
+  dbf[hdrLen-1] = 0x0D;
+  const fit = (s, n) => { let b = enc.encode(s); while (b.length > n) { s = s.slice(0,-1); b = enc.encode(s); } return b; };
+  arr.forEach((f, ri) => {
+    let p = hdrLen + ri*recLen; dbf[p++] = 0x20;
+    const ud = new Date(f.updatedAt), ymd = `${ud.getFullYear()}${String(ud.getMonth()+1).padStart(2,"0")}${String(ud.getDate()).padStart(2,"0")}`;
+    const vals = [f.farm, f.field, f.grass, f.status, null, f.mappedBy, ymd, (f.notes||"").replace(/\s+/g," "), f.id];
+    defs.forEach((d,k) => {
+      dbf.fill(0x20, p, p+d[2]);
+      if (d[1] === "N") { const s = (Number(f.acres)||0).toFixed(d[3]).padStart(d[2]," "); enc.encode(s).forEach((b,j)=>dbf[p+j]=b); }
+      else fit(String(vals[k] ?? ""), d[2]).forEach((b,j)=>dbf[p+j]=b);
+      p += d[2];
+    });
+  });
+  dbf[dbf.length-1] = 0x1A;
+  const prj = 'GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137.0,298.257223563]],PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433]]';
+  return zip([
+    {name: base+".shp", data: new Uint8Array(shp.buffer)}, {name: base+".shx", data: new Uint8Array(shx.buffer)},
+    {name: base+".dbf", data: dbf}, {name: base+".prj", data: enc.encode(prj)}, {name: base+".cpg", data: enc.encode("UTF-8")}
+  ]);
+}
+function downloadBlob(name, blob){ const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); }
+
+const stamp = () => new Date().toISOString().slice(0,10);
+// ---------- export (one screen, plain choices; phones get the share sheet) ----------
+let exPreset = null;
+function exportScopes(){
+  const arr = live(), farms = [...new Set(arr.map(f => f.farm).filter(Boolean))].sort();
+  const opts = [{v:"all", t:`All fields (${arr.length})`}];
+  if (exPreset && exPreset.startsWith("field:")) { const f = fields.find(x => x.id === exPreset.slice(6)); if (f) opts.unshift({v:exPreset, t:`This field: ${f.field || "Field"} (${f.farm})`}); }
+  if (settings.user) { const n = arr.filter(f => f.mappedBy === settings.user).length; if (n) opts.push({v:"mine", t:`Fields I mapped (${n})`}); }
+  farms.forEach(fm => opts.push({v:"farm:"+fm, t:`${fm} (${arr.filter(f => f.farm === fm).length})`}));
+  return opts;
+}
+function scopeFields(v){
+  const arr = live();
+  if (v === "all") return arr;
+  if (v === "mine") return arr.filter(f => f.mappedBy === settings.user);
+  if (v.startsWith("farm:")) return arr.filter(f => f.farm === v.slice(5));
+  if (v.startsWith("field:")) return arr.filter(f => f.id === v.slice(6));
+  return arr;
+}
+function scopeName(v){
+  if (v === "all") return "All farms"; if (v === "mine") return (settings.user || "My") + " fields";
+  if (v.startsWith("farm:")) return v.slice(5);
+  if (v.startsWith("field:")) { const f = fields.find(x => x.id === v.slice(6)); return f ? `${f.farm} ${f.field || "Field"}` : "Field"; }
+  return "Fields";
+}
+const isPhone = () => window.matchMedia && matchMedia("(pointer:coarse)").matches;
+const emailReady = () => !!(settings.url && settings.emailTo);
+function openExport(preset){
+  if (!live().length) { toast("No fields to share yet"); return; }
+  exPreset = preset || null;
+  const sel = $("exScope"); sel.innerHTML = exportScopes().map(o => `<option value="${esc(o.v)}">${esc(o.t)}</option>`).join("");
+  sel.value = exPreset || "all"; updateExCount();
+  $("exNameRow").style.display = settings.user ? "none" : "";
+  $("exName").value = settings.user || "";
+  const email = emailReady();
+  $("btnEmailOffice").style.display = email ? "" : "none";
+  $("btnEmailOffice").disabled = false; $("btnEmailOffice").textContent = "📧 Email to the office";
+  $("exTo").textContent = email ? `Goes straight to ${settings.emailTo}` : "";
+  $("btnShareOther").textContent = email ? "Send another way…" : "📤 Share field boundaries";
+  $("btnShareOther").className = email ? "btn" : "bigbtn";
+  $("exHint").textContent = email ? "" : (isPhone() ? "Your phone's share menu opens — pick Mail or Messages." : "The file goes to your Downloads folder.");
+  openSheet("sheetExport");
+}
+function updateExCount(){ const a = scopeFields($("exScope").value); const ac = a.reduce((t,f)=>t+(f.acres||0),0); $("exCount").textContent = `${a.length} field${a.length===1?"":"s"} · ${fmtAc(ac)}`; }
+$("exScope").onchange = updateExCount;
+$("exName").onchange = () => { settings.user = $("exName").value.trim(); LS.set("settings", settings); };
+$("btnMenuExport").onclick = () => openExport();
+const cleanName = s => String(s).replace(/[\\/:*?"<>|]+/g, "").replace(/\s+/g, " ").trim().slice(0, 60);
+function buildPackage(){
+  const v = $("exScope").value, arr = scopeFields(v);
+  if (!arr.length) return null;
+  const who = ($("exName").value.trim() || settings.user || "").trim();
+  if (who && who !== settings.user) { settings.user = who; LS.set("settings", settings); }
+  const name = cleanName(`Field boundaries - ${scopeName(v)} - ${stamp()}`) + ".zip";
+  const blob = toShapefileZip(arr, "sod_fields_" + stamp().replace(/-/g, ""));
+  const tot = arr.reduce((t,f)=>t+(f.acres||0),0);
+  const subject = arr.length === 1 ? `Field boundary: ${arr[0].farm} - ${arr[0].field || "Field"} (${fmtAc(arr[0].acres)})` : `Field boundaries: ${scopeName(v)} (${arr.length} fields, ${fmtAc(tot)})`;
+  const lines = arr.map(f => { const c = turf.centroid(turf.polygon([f.coords])).geometry.coordinates;
+    return `- ${f.farm} - ${f.field || "Field"}: ${fmtAc(f.acres)}, ${f.grass}, ${f.status || ""}${f.mappedBy ? `, mapped by ${f.mappedBy}` : ""}\n  Map: https://www.google.com/maps?q=${c[1].toFixed(6)},${c[0].toFixed(6)}${f.notes ? `\n  Notes: ${f.notes}` : ""}`; });
+  const body = `${who ? who + " sent" : "Sent"} ${arr.length === 1 ? "a field boundary" : arr.length + " field boundaries"} from Sod Field Mapper.\n\n${lines.join("\n")}\n\nTotal: ${fmtAc(tot)}\nThe boundary file is attached.`;
+  return {name, blob, subject, body};
+}
+const blobToBase64 = blob => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1]); r.onerror = rej; r.readAsDataURL(blob); });
+$("btnEmailOffice").onclick = async () => {
+  const pkg = buildPackage(); if (!pkg) { toast("No fields in that selection"); return; }
+  const btn = $("btnEmailOffice"); btn.disabled = true; btn.textContent = "Sending…";
+  try {
+    if (outbox.length) await sync();   // make sure the office copy in the Sheet is current too
+    const r = await fetch(settings.url, {method:"POST", headers:{"Content-Type":"text/plain;charset=utf-8"},
+      body: JSON.stringify({key:settings.key, action:"email", filename:pkg.name, zipBase64: await blobToBase64(pkg.blob), subject:pkg.subject, body:pkg.body, from:settings.user||""})});
+    const j = await r.json(); if (j.error) throw new Error(j.error);
+    btn.textContent = "✓ Sent"; toast("Sent to the office ✓", 3500); setTimeout(closeSheets, 1200);
+  } catch(err) {
+    btn.disabled = false; btn.textContent = "📧 Try again";
+    $("exHint").textContent = !navigator.onLine ? "No signal right now. Try again when you have service, or tap “Send another way”." : (/failed to fetch|network|load failed/i.test(err.message) ? "Couldn't reach the office. Check your signal and tap Try again, or tap “Send another way”." : `Couldn't send: ${err.message}. Tap Try again, or tap “Send another way”.`);
+    toast("Didn't send — see message", 4000);
+  }
+};
+$("btnShareOther").onclick = async () => {
+  const pkg = buildPackage(); if (!pkg) { toast("No fields in that selection"); return; }
+  const file = new File([pkg.blob], pkg.name, {type:"application/zip"});
+  if (isPhone() && navigator.canShare) {
+    let can = false; try { can = navigator.canShare({files:[file]}); } catch(e){}
+    if (can) {
+      try { await navigator.share({files:[file], title:pkg.subject, text:pkg.body}); closeSheets(); return; }
+      catch(e){ if (e.name === "AbortError") return; }
+    }
+  }
+  downloadBlob(pkg.name, pkg.blob); closeSheets();
+  toast(isPhone() ? `Saved to your phone's Downloads: ${pkg.name}` : `Saved to Downloads: ${pkg.name}`, 5000);
+};
+
+// ---------- find a location: photo GPS (EXIF), map links, coordinates ----------
+// EXIF reader for JPEG and HEIC/HEIF (iPhone) — returns {lat,lng,acc,dir,taken} or null
+function exifFromBuffer(buf){
+  const dv = new DataView(buf), u8 = new Uint8Array(buf);
+  const str = (o,n) => String.fromCharCode(...u8.subarray(o, o+n));
+  let tiff = -1;
+  if (dv.getUint16(0) === 0xFFD8) {                      // JPEG: find APP1 "Exif\0\0"
+    let o = 2;
+    while (o + 4 < u8.length) {
+      if (u8[o] !== 0xFF) { o++; continue; }
+      const m = u8[o+1]; if (m === 0xD9 || m === 0xDA) break;
+      const len = dv.getUint16(o+2);
+      if (m === 0xE1 && str(o+4,6) === "Exif\0\0") { tiff = o + 10; break; }
+      o += 2 + len;
+    }
+  } else if (str(4,4) === "ftyp") {                      // HEIC/HEIF: meta → iinf (find Exif item) → iloc (where it is)
+    const boxes = (start, end) => { const out = []; let o = start;
+      while (o + 8 <= end) { let size = dv.getUint32(o); const type = str(o+4,4); let hdr = 8;
+        if (size === 1) { size = Number(dv.getBigUint64(o+8)); hdr = 16; } else if (size === 0) size = end - o;
+        if (size < hdr) break; out.push({type, start:o, body:o+hdr, end:o+size}); o += size; }
+      return out; };
+    const meta = boxes(0, u8.length).find(b => b.type === "meta"); if (!meta) return null;
+    const inner = boxes(meta.body + 4, meta.end);
+    const iinf = inner.find(b => b.type === "iinf"), iloc = inner.find(b => b.type === "iloc");
+    if (!iinf || !iloc) return null;
+    let exifId = null;
+    { const v = u8[iinf.body]; const first = iinf.body + 4 + (v === 0 ? 2 : 4);
+      for (const e of boxes(first, iinf.end)) { if (e.type !== "infe") continue;
+        const ev = u8[e.body]; if (ev < 2) continue;
+        const id = ev === 2 ? dv.getUint16(e.body+4) : dv.getUint32(e.body+4);
+        const t = str(e.body + 4 + (ev === 2 ? 2 : 4) + 2, 4);
+        if (t === "Exif") { exifId = id; break; } } }
+    if (exifId == null) return null;
+    { let o = iloc.body; const v = u8[o]; o += 4;
+      const offSz = u8[o] >> 4, lenSz = u8[o] & 15, baseSz = u8[o+1] >> 4, idxSz = (v === 1 || v === 2) ? (u8[o+1] & 15) : 0; o += 2;
+      const rd = n => { let x = 0; for (let i=0;i<n;i++) x = x*256 + u8[o+i]; o += n; return x; };
+      const count = v < 2 ? rd(2) : rd(4);
+      for (let i = 0; i < count && tiff < 0; i++) {
+        const id = v < 2 ? rd(2) : rd(4);
+        if (v === 1 || v === 2) rd(2);                    // construction method
+        rd(2);                                            // data reference index
+        const base = rd(baseSz), ext = rd(2); let firstOff = null;
+        for (let k = 0; k < ext; k++) { if (idxSz) rd(idxSz); const eo = rd(offSz); rd(lenSz); if (firstOff == null) firstOff = base + eo; }
+        if (id === exifId && firstOff != null) {
+          const p = firstOff + 4 + dv.getUint32(firstOff); // 4-byte offset to TIFF header
+          const ok = q => q+4 <= u8.length && (str(q,4) === "II*\0" || str(q,4) === "MM\0*");
+          if (ok(p)) tiff = p; else for (let q = firstOff; q < firstOff + 64; q++) if (ok(q)) { tiff = q; break; }
+        }
+      }
+    }
+  }
+  if (tiff < 0 || tiff + 8 > u8.length) return null;
+  const le = str(tiff,2) === "II";
+  const g16 = o => dv.getUint16(tiff+o, le), g32 = o => dv.getUint32(tiff+o, le);
+  const ifd = off => { const out = {}; if (off + 2 > u8.length - tiff) return out; const n = g16(off);
+    for (let i = 0; i < n; i++) { const e = off + 2 + i*12; if (tiff + e + 12 > u8.length) break;
+      out[g16(e)] = {type:g16(e+2), count:g32(e+4), vo:e+8, val:g32(e+8)}; } return out; };
+  const rat = (o) => { const d = g32(o+4); return d ? g32(o)/d : 0; };
+  const numv = t => { if (!t) return null; const o = t.count*({3:2,4:4,5:8,10:8,11:4,12:8}[t.type]||1) <= 4 ? t.vo : t.val;
+    switch (t.type) { case 3: return g16(o); case 4: return g32(o); case 5: case 10: return rat(o); case 11: return dv.getFloat32(tiff+o, le); case 12: return dv.getFloat64(tiff+o, le); default: return null; } };
+  const ascii = t => t ? (t.count <= 4 ? str(tiff+t.vo, t.count) : str(tiff+t.val, t.count)).replace(/\0.*$/,"") : "";
+  const ifd0 = ifd(g32(4));
+  if (!ifd0[0x8825]) return null;
+  const gps = ifd(ifd0[0x8825].val);
+  if (!gps[2] || !gps[4]) return null;
+  const dms = t => rat(t.val) + rat(t.val+8)/60 + rat(t.val+16)/3600;
+  let lat = dms(gps[2]), lng = dms(gps[4]);
+  if (/S/i.test(ascii(gps[1]))) lat = -lat;
+  if (/W/i.test(ascii(gps[3]))) lng = -lng;
+  if (!lat && !lng) return null;
+  let taken = "";
+  if (ifd0[0x8769]) { const ex = ifd(ifd0[0x8769].val); taken = ascii(ex[0x9003]); }
+  if (!taken) taken = ascii(ifd0[0x0132]);
+  return { lat, lng, acc: numv(gps[0x1F]) || null, dir: numv(gps[0x11]), taken };
+}
+
+// Coordinates out of pasted text / Google & Apple Maps links. Returns {lat,lng} | {short:true} | null
+function parseLocationText(raw){
+  let s = String(raw || "").trim(); if (!s) return null;
+  try { s = decodeURIComponent(s.replace(/\+/g, " ")); } catch(e){}
+  const ok = (a,b) => isFinite(a) && isFinite(b) && Math.abs(a) <= 90 && Math.abs(b) <= 180 && !(a === 0 && b === 0);
+  const num = "(-?\\d{1,3}(?:\\.\\d+)?)";
+  const tries = [
+    new RegExp(`!3d${num}!4d${num}`),                                     // Google place pin (exact)
+    new RegExp(`[?&](?:q|query|ll|sll|daddr|destination|coordinate|center|address)=${num}\\s*,\\s*${num}`),
+    new RegExp(`/(?:place|search|dir)/${num}\\s*,\\s*${num}`),
+    new RegExp(`@${num},${num}`),                                         // Google map center
+  ];
+  for (const re of tries) { const m = s.match(re); if (m && ok(+m[1], +m[2])) return {lat:+m[1], lng:+m[2]}; }
+  // degrees-minutes-seconds:  35°12'34.5"N 79°27'10.2"W
+  const d = s.match(/(\d{1,2})\s*°\s*(\d{1,2})\s*['′’]\s*([\d.]+)\s*(?:["″”]|'')?\s*([NS])[\s,;]*(\d{1,3})\s*°\s*(\d{1,2})\s*['′’]\s*([\d.]+)\s*(?:["″”]|'')?\s*([EW])/i);
+  if (d) { let a = +d[1] + d[2]/60 + d[3]/3600, b = +d[5] + d[6]/60 + d[7]/3600; if (/S/i.test(d[4])) a=-a; if (/W/i.test(d[8])) b=-b; if (ok(a,b)) return {lat:a, lng:b}; }
+  // decimal with hemisphere letters:  35.1234° N, 79.5678° W
+  const h = s.match(/(\d{1,2}\.\d+)\s*°?\s*([NS])[\s,;]+(\d{1,3}\.\d+)\s*°?\s*([EW])/i);
+  if (h) { let a = +h[1], b = +h[3]; if (/S/i.test(h[2])) a=-a; if (/W/i.test(h[4])) b=-b; if (ok(a,b)) return {lat:a, lng:b}; }
+  // plain "lat, lng" anywhere
+  const p = s.match(/(-?\d{1,2}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)/) || s.match(/(-?\d{1,2}\.\d{3,})\s+(-?\d{1,3}\.\d{3,})/);
+  if (p && ok(+p[1], +p[2])) return {lat:+p[1], lng:+p[2]};
+  if (/(maps\.app\.goo\.gl|goo\.gl\/maps|maps\.apple\/p\/|apple\.co\/|g\.co\/kgs)/i.test(s)) return {short:true};
+  return null;
+}
+
+const foundLayer = L.layerGroup().addTo(map);
+const pinSvg = c => `<svg class="pin" viewBox="0 0 24 24"><path d="M12 23s8-7.6 8-13.5A8 8 0 0 0 4 9.5C4 15.4 12 23 12 23z" fill="${c}" stroke="#fff" stroke-width="2"/><circle cx="12" cy="9.5" r="3" fill="#fff"/></svg>`;
+function addPin(lat, lng, info){
+  info = info || {};
+  const m = L.marker([lat,lng], {icon:L.divIcon({className:"", html:pinSvg("#e53935"), iconSize:[0,0]})}).addTo(foundLayer);
+  const extras = [];
+  if (info.dir != null) {   // which way the camera was pointing (dashed line ~250 m)
+    const R = 6371008.8, br = info.dir*Math.PI/180, d = 250/R, la = lat*Math.PI/180, lo = lng*Math.PI/180;
+    const la2 = Math.asin(Math.sin(la)*Math.cos(d) + Math.cos(la)*Math.sin(d)*Math.cos(br));
+    const lo2 = lo + Math.atan2(Math.sin(br)*Math.sin(d)*Math.cos(la), Math.cos(d) - Math.sin(la)*Math.sin(la2));
+    extras.push(L.polyline([[lat,lng],[la2*180/Math.PI, lo2*180/Math.PI]], {color:"#e53935", weight:3, dashArray:"6 6", interactive:false}).addTo(foundLayer));
+  }
+  if (info.acc) extras.push(L.circle([lat,lng], {radius:info.acc, color:"#e53935", weight:1, fillOpacity:.08, interactive:false}).addTo(foundLayer));
+  const el = document.createElement("div"); el.className = "pinpop";
+  el.innerHTML = (info.img ? `<img src="${info.img}" alt="" onerror="this.remove()">` : "")
+    + `<b>${esc(info.name || "Dropped pin")}</b><br>`
+    + (info.taken ? `Taken ${esc(info.taken.replace(/^(\d{4}):(\d\d):(\d\d)/, "$2/$3/$1"))}<br>` : "")
+    + `<span class="muted">${lat.toFixed(6)}, ${lng.toFixed(6)}${info.acc ? ` · ±${Math.round(info.acc)} m` : ""}${info.dir != null ? ` · facing ${Math.round(info.dir)}°` : ""}</span><br>`;
+  const b1 = document.createElement("button"); b1.className = "btn primary"; b1.textContent = "Start field here";
+  b1.onclick = () => { m.closePopup(); map.setView([lat,lng], Math.max(map.getZoom(), 18)); startDraw(null); };
+  const b2 = document.createElement("button"); b2.className = "btn"; b2.textContent = "Copy coords";
+  b2.onclick = async () => { try { await navigator.clipboard.writeText(`${lat.toFixed(6)}, ${lng.toFixed(6)}`); toast("Coordinates copied"); } catch(e){ toast(`${lat.toFixed(6)}, ${lng.toFixed(6)}`, 5000); } };
+  const b3 = document.createElement("button"); b3.className = "btn"; b3.textContent = "Remove";
+  b3.onclick = () => { foundLayer.removeLayer(m); extras.forEach(x => foundLayer.removeLayer(x)); };
+  el.append(b1, b2, b3);
+  m.bindPopup(el, {maxWidth:260});
+  return m;
+}
+function showPins(markers){
+  if (!markers.length) return;
+  if (markers.length === 1) { const ll = markers[0].getLatLng(); map.setView(ll, 18); setTimeout(() => markers[0].openPopup(), 350); }
+  else map.fitBounds(L.featureGroup(markers).getBounds(), {padding:[50,50], maxZoom:18});
+}
+async function findFromFiles(fileList){
+  const files = [...fileList]; const pins = [], none = [];
+  for (const f of files) {
+    if (!/^image\//.test(f.type) && !/\.(jpe?g|heic|heif|tiff?)$/i.test(f.name)) { none.push(f.name + " (not a photo)"); continue; }
+    let g = null;
+    try { g = exifFromBuffer(await f.arrayBuffer()); } catch(e) { g = null; }
+    if (g) pins.push(addPin(g.lat, g.lng, {name:f.name, taken:g.taken, acc:g.acc, dir:g.dir, img:URL.createObjectURL(f)}));
+    else none.push(f.name);
+  }
+  if (pins.length) { closeSheets(); showPins(pins); }
+  const msg = (pins.length ? `Found ${pins.length} photo location${pins.length>1?"s":""}. ` : "")
+    + (none.length ? `No location data in: ${none.join(", ")}. The phone may have stripped it — ask them to send the original photo (email "actual size", AirDrop, or Google Photos/iCloud link), or ask for a dropped pin instead.` : "");
+  if (msg) { $("findMsg").textContent = msg; toast(msg, none.length ? 7000 : 3000); }
+}
+function findFromText(text){
+  const r = parseLocationText(text);
+  if (!r) { $("findMsg").textContent = "Couldn't find coordinates in that. Paste coordinates like 35.1234, -79.5678 or a full Google/Apple Maps link."; toast("No coordinates found in that text", 3500); return false; }
+  if (r.short) { $("findMsg").textContent = "That's a short share link, which can't be read directly. Open it, then copy the coordinates (or the full link from the address bar) and paste that here."; toast("Short link — open it and copy the coordinates instead", 5000); return false; }
+  const m = addPin(r.lat, r.lng, {name:"Dropped pin"}); closeSheets(); showPins([m]); $("findText").value = ""; $("findMsg").textContent = "";
+  return true;
+}
+$("btnFind").onclick = () => { $("findMsg").textContent = ""; openSheet("sheetFind"); setTimeout(() => $("findText").focus(), 250); };
+$("btnPickPhoto").onclick = () => $("filePhoto").click();
+$("filePhoto").onchange = e => { if (e.target.files.length) findFromFiles(e.target.files); e.target.value = ""; };
+$("btnFindGo").onclick = () => findFromText($("findText").value);
+$("findText").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); findFromText($("findText").value); } });
+$("btnClearPins").onclick = () => { foundLayer.clearLayers(); toast("Pins cleared"); };
+// drag & drop anywhere (computer)
+let dragDepth = 0;
+const hasDragData = e => e.dataTransfer && [...e.dataTransfer.types].some(t => t === "Files" || t === "text/uri-list" || t === "text/plain");
+document.addEventListener("dragenter", e => { if (!hasDragData(e)) return; e.preventDefault(); dragDepth++; $("dropOverlay").classList.add("on"); $("dropZone").classList.add("hover"); });
+document.addEventListener("dragover", e => { if (hasDragData(e)) e.preventDefault(); });
+document.addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; $("dropOverlay").classList.remove("on"); $("dropZone").classList.remove("hover"); } });
+document.addEventListener("drop", e => {
+  if (!e.dataTransfer) return; e.preventDefault(); dragDepth = 0; $("dropOverlay").classList.remove("on"); $("dropZone").classList.remove("hover");
+  if (e.dataTransfer.files && e.dataTransfer.files.length) { findFromFiles(e.dataTransfer.files); return; }
+  const t = e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain");
+  if (t) findFromText(t);
+});
+// paste a link / coordinates / photo anywhere that isn't a text box
+document.addEventListener("paste", e => {
+  const tgt = e.target; if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA")) return;
+  const cd = e.clipboardData; if (!cd) return;
+  if (cd.files && cd.files.length) { e.preventDefault(); findFromFiles(cd.files); return; }
+  const t = cd.getData("text"); if (t && parseLocationText(t)) { e.preventDefault(); findFromText(t); }
+});
+
+// ---------- sync (Google Apps Script) ----------
+function queue(id){ if (!outbox.includes(id)) outbox.push(id); saveLocal(); setDot(); sync(); }
+function setDot(state){
+  const d = $("syncDot");
+  d.className = state || (!settings.url ? "" : outbox.length ? "pending" : "ok");
+  d.title = !settings.url ? "Not syncing (set up team sync in the menu)" : outbox.length ? `${outbox.length} change(s) waiting to sync` : "Synced";
+}
+let syncing = false, syncAgain = false;
+async function sync(verbose){
+  if (!settings.url) { setDot(); if (verbose) toast("Add a sync URL first"); return; }
+  if (syncing) { syncAgain = true; return; }
+  syncing = true;
+  try {
+    // push
+    if (outbox.length) {
+      const recs = outbox.map(id => fields.find(f => f.id === id)).filter(Boolean);
+      const r = await fetch(settings.url, {method:"POST", headers:{"Content-Type":"text/plain;charset=utf-8"}, body:JSON.stringify({key:settings.key, action:"upsert", fields:recs})});
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      const sent = new Set(recs.map(r => r.id)); outbox = outbox.filter(id => !sent.has(id)); saveLocal();
+    }
+    // pull
+    const r = await fetch(settings.url + (settings.url.includes("?") ? "&" : "?") + "key=" + encodeURIComponent(settings.key) + "&t=" + Date.now());
+    const j = await r.json(); if (j.error) throw new Error(j.error);
+    if ("emailTo" in j && j.emailTo !== settings.emailTo) { settings.emailTo = j.emailTo || ""; LS.set("settings", settings); }
+    const byId = new Map(fields.map(f => [f.id, f]));
+    let changed = 0;
+    for (const rf of j.fields || []) {
+      const lf = byId.get(rf.id);
+      if (outbox.includes(rf.id)) continue;               // local edit pending: keep ours
+      if (!lf || (rf.updatedAt || 0) > (lf.updatedAt || 0)) { byId.set(rf.id, rf); changed++; }
+    }
+    fields = [...byId.values()]; saveLocal();
+    if (changed && mode === "view") renderFields();
+    setDot(); $("syncStatus").textContent = `Last sync ${new Date().toLocaleTimeString()} · ${live().length} fields`;
+    if (verbose) toast("Synced ✓");
+  } catch(err) {
+    setDot("err"); $("syncStatus").textContent = "Sync problem: " + err.message + " (changes are saved on this device and will retry)";
+    if (verbose) toast("Sync failed: " + err.message, 4000);
+  } finally {
+    syncing = false; if (syncAgain) { syncAgain = false; setTimeout(sync, 300); }
+  }
+}
+setInterval(() => { if (!recording) sync(); }, 60000);
+window.addEventListener("online", () => sync());
+document.addEventListener("visibilitychange", () => { if (!document.hidden && !recording) sync(); });
+
+window.__sfm = {get fields(){return fields}, get editing(){return editing}, acresOf, onFix, map, toKML, toGeoJSON, sync, openExport, scopeFields, get settings(){return settings}, exifFromBuffer, parseLocationText, findFromFiles, findFromText, shp: async (b)=>Array.from(new Uint8Array(await toShapefileZip(live(), b).arrayBuffer()))};
+
+// ---------- boot ----------
+renderFields(); renderToolbar(); setDot(); sync();
+if (live().length && !LS.get("view", null)) { const b = L.featureGroup(Object.values(polyById)).getBounds(); if (b.isValid()) map.fitBounds(b); }
+})();
+</script>
+</body>
+</html>

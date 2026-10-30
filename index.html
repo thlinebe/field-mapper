@@ -59,6 +59,14 @@
   .flabel:before{display:none}
   #toast{position:absolute;left:50%;bottom:90px;transform:translateX(-50%);z-index:1300;background:#222;color:#fff;padding:10px 14px;border-radius:10px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw;text-align:center}
   #toast.show{opacity:1}
+  .dropzone{border:2px dashed #b9c9bd;border-radius:12px;padding:18px;text-align:center;background:#f6faf7}
+  .dropzone.hover{background:#e3f1e7;border-color:var(--green2)}
+  #dropOverlay{position:fixed;inset:0;z-index:1400;background:rgba(31,61,43,.55);display:none;align-items:center;justify-content:center;pointer-events:none}
+  #dropOverlay div{background:#fff;padding:18px 24px;border-radius:14px;font-weight:700;font-size:18px;box-shadow:0 6px 30px rgba(0,0,0,.35)}
+  #dropOverlay.on{display:flex}
+  .pin{width:26px;height:26px;margin:-26px 0 0 -13px}
+  .pinpop{min-width:180px;font-size:13px}.pinpop img{width:200px;max-width:60vw;border-radius:8px;display:block;margin-bottom:6px}
+  .pinpop .btn{padding:8px 10px;min-height:0;font-size:13px;box-shadow:none;border:1px solid var(--line);margin:6px 4px 0 0}
   .seg{display:flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}.seg button{flex:1;border:0;background:#fff;padding:9px;font-size:14px;cursor:pointer}.seg button.on{background:var(--green2);color:#fff}
   details{margin-top:10px}summary{cursor:pointer;font-weight:600}
   code{background:#f2f2f2;padding:1px 4px;border-radius:4px;font-size:12px;word-break:break-all}
@@ -71,6 +79,7 @@
 <header>
   <span id="syncDot" title="Sync status"></span>
   <h1 id="title">Sod Field Mapper</h1>
+  <button class="hbtn" id="btnFind">🔍 Find</button>
   <button class="hbtn" id="btnList">Fields</button>
   <button class="hbtn" id="btnMenu">☰</button>
 </header>
@@ -160,6 +169,34 @@
   <p class="muted" style="margin-top:14px">Imagery © Esri, Maxar, Earthstar Geographics. Acreage is geodesic (true ground area), shown in US acres. Phone GPS is typically ±3–5 m — trace on imagery for tighter lines and use GPS to confirm edges you can't see.</p>
 </div>
 
+<!-- Find a location -->
+<div class="sheet" id="sheetFind">
+  <h2>Find a location <button class="x" data-close>×</button></h2>
+  <div id="dropZone" class="dropzone">
+    <b>Drop photos here</b><br><span class="muted">or</span><br>
+    <button class="btn primary" id="btnPickPhoto" style="margin-top:6px">Choose photo(s)</button>
+    <input type="file" id="filePhoto" accept="image/*,.heic,.heif" multiple style="display:none">
+  </div>
+  <label>…or paste a Google Maps / Apple Maps link, or coordinates</label>
+  <div class="row" style="align-items:center">
+    <input id="findText" placeholder="35.1234, -79.5678  or  maps link" autocomplete="off" style="flex:4">
+    <button class="btn primary" id="btnFindGo" style="flex:1;box-shadow:none">Go</button>
+  </div>
+  <div class="muted" id="findMsg" style="margin-top:8px"></div>
+  <details>
+    <summary>How to get a location from Google / Apple Maps</summary>
+    <p class="muted"><b>Google Maps (computer):</b> right-click the spot → click the coordinates at the top of the menu (copies them) → paste here.<br>
+    <b>Google Maps (phone):</b> long-press to drop a pin → swipe up → tap the coordinates to copy.<br>
+    <b>Apple Maps (Mac):</b> right-click → Drop Pin → click the pin → copy the coordinates shown, or Share → Copy Link.<br>
+    <b>Apple Maps (iPhone):</b> long-press to drop a pin → swipe up → tap the coordinates to copy.<br>
+    Short share links (maps.app.goo.gl…, maps.apple/p/…) can't be read directly — open the link first, then copy the coordinates or the full address-bar link.</p>
+  </details>
+  <p class="muted">Tip: on a computer you can also drag a photo or link anywhere onto the map, or press Ctrl/⌘+V to paste a link. Pins are temporary (this device only) — they clear when you close the app.</p>
+  <div class="actions"><button class="btn" id="btnClearPins">Clear pins</button></div>
+</div>
+
+<div id="dropOverlay"><div>Drop photo or map link to find it</div></div>
+
 <div id="toast"></div>
 
 <script>
@@ -180,9 +217,12 @@ const LS = {
 };
 let settings = Object.assign({user:"", url:"", key:"", spacing:3, acc:10, labels:1}, LS.get("settings", {}));
 // onboarding via invite link: ?sync=...&key=...
+// The invite params stay in the address bar on purpose: an iPhone "Add to Home Screen" app keeps its own
+// storage separate from Safari, so the saved home-screen link must carry the sync settings with it.
 (() => { const q = new URLSearchParams(location.search);
-  if (q.get("sync")) { settings.url = q.get("sync"); settings.key = q.get("key")||""; LS.set("settings", settings);
-    history.replaceState(null, "", location.pathname); setTimeout(()=>toast("Team sync set up from invite link"), 600); } })();
+  if (q.get("sync") && (q.get("sync") !== settings.url || (q.get("key")||"") !== settings.key)) {
+    settings.url = q.get("sync"); settings.key = q.get("key")||""; LS.set("settings", settings);
+    setTimeout(()=>toast("Team sync set up from invite link"), 600); } })();
 
 let fields = LS.get("fields", []);      // all fields, including soft-deleted (deleted:true)
 let outbox = LS.get("outbox", []);      // ids waiting to push
@@ -612,6 +652,9 @@ $("btnExportCsv").onclick = () => download(`sod-fields-${stamp()}.csv`, toCSV(li
 $("btnImport").onclick = () => $("fileImport").click();
 $("fileImport").onchange = async e => {
   const file = e.target.files[0]; if (!file) return; const text = await file.text(); e.target.value = "";
+  importBoundaryText(text);
+};
+function importBoundaryText(text){
   let polys = [];
   try {
     if (/^\s*</.test(text)) {
@@ -648,7 +691,192 @@ $("fileImport").onchange = async e => {
   renderFields(); closeSheets();
   if (n) { const b = L.featureGroup(Object.values(polyById)).getBounds(); if (b.isValid()) map.fitBounds(b, {maxZoom:17}); }
   toast(n ? `Imported ${n} field${n>1?"s":""}` : "Nothing new to import");
-};
+}
+
+// ---------- find a location: photo GPS (EXIF), map links, coordinates ----------
+// EXIF reader for JPEG and HEIC/HEIF (iPhone) — returns {lat,lng,acc,dir,taken} or null
+function exifFromBuffer(buf){
+  const dv = new DataView(buf), u8 = new Uint8Array(buf);
+  const str = (o,n) => String.fromCharCode(...u8.subarray(o, o+n));
+  let tiff = -1;
+  if (dv.getUint16(0) === 0xFFD8) {                      // JPEG: find APP1 "Exif\0\0"
+    let o = 2;
+    while (o + 4 < u8.length) {
+      if (u8[o] !== 0xFF) { o++; continue; }
+      const m = u8[o+1]; if (m === 0xD9 || m === 0xDA) break;
+      const len = dv.getUint16(o+2);
+      if (m === 0xE1 && str(o+4,6) === "Exif\0\0") { tiff = o + 10; break; }
+      o += 2 + len;
+    }
+  } else if (str(4,4) === "ftyp") {                      // HEIC/HEIF: meta → iinf (find Exif item) → iloc (where it is)
+    const boxes = (start, end) => { const out = []; let o = start;
+      while (o + 8 <= end) { let size = dv.getUint32(o); const type = str(o+4,4); let hdr = 8;
+        if (size === 1) { size = Number(dv.getBigUint64(o+8)); hdr = 16; } else if (size === 0) size = end - o;
+        if (size < hdr) break; out.push({type, start:o, body:o+hdr, end:o+size}); o += size; }
+      return out; };
+    const meta = boxes(0, u8.length).find(b => b.type === "meta"); if (!meta) return null;
+    const inner = boxes(meta.body + 4, meta.end);
+    const iinf = inner.find(b => b.type === "iinf"), iloc = inner.find(b => b.type === "iloc");
+    if (!iinf || !iloc) return null;
+    let exifId = null;
+    { const v = u8[iinf.body]; const first = iinf.body + 4 + (v === 0 ? 2 : 4);
+      for (const e of boxes(first, iinf.end)) { if (e.type !== "infe") continue;
+        const ev = u8[e.body]; if (ev < 2) continue;
+        const id = ev === 2 ? dv.getUint16(e.body+4) : dv.getUint32(e.body+4);
+        const t = str(e.body + 4 + (ev === 2 ? 2 : 4) + 2, 4);
+        if (t === "Exif") { exifId = id; break; } } }
+    if (exifId == null) return null;
+    { let o = iloc.body; const v = u8[o]; o += 4;
+      const offSz = u8[o] >> 4, lenSz = u8[o] & 15, baseSz = u8[o+1] >> 4, idxSz = (v === 1 || v === 2) ? (u8[o+1] & 15) : 0; o += 2;
+      const rd = n => { let x = 0; for (let i=0;i<n;i++) x = x*256 + u8[o+i]; o += n; return x; };
+      const count = v < 2 ? rd(2) : rd(4);
+      for (let i = 0; i < count && tiff < 0; i++) {
+        const id = v < 2 ? rd(2) : rd(4);
+        if (v === 1 || v === 2) rd(2);                    // construction method
+        rd(2);                                            // data reference index
+        const base = rd(baseSz), ext = rd(2); let firstOff = null;
+        for (let k = 0; k < ext; k++) { if (idxSz) rd(idxSz); const eo = rd(offSz); rd(lenSz); if (firstOff == null) firstOff = base + eo; }
+        if (id === exifId && firstOff != null) {
+          const p = firstOff + 4 + dv.getUint32(firstOff); // 4-byte offset to TIFF header
+          const ok = q => q+4 <= u8.length && (str(q,4) === "II*\0" || str(q,4) === "MM\0*");
+          if (ok(p)) tiff = p; else for (let q = firstOff; q < firstOff + 64; q++) if (ok(q)) { tiff = q; break; }
+        }
+      }
+    }
+  }
+  if (tiff < 0 || tiff + 8 > u8.length) return null;
+  const le = str(tiff,2) === "II";
+  const g16 = o => dv.getUint16(tiff+o, le), g32 = o => dv.getUint32(tiff+o, le);
+  const ifd = off => { const out = {}; if (off + 2 > u8.length - tiff) return out; const n = g16(off);
+    for (let i = 0; i < n; i++) { const e = off + 2 + i*12; if (tiff + e + 12 > u8.length) break;
+      out[g16(e)] = {type:g16(e+2), count:g32(e+4), vo:e+8, val:g32(e+8)}; } return out; };
+  const rat = (o) => { const d = g32(o+4); return d ? g32(o)/d : 0; };
+  const numv = t => { if (!t) return null; const o = t.count*({3:2,4:4,5:8,10:8,11:4,12:8}[t.type]||1) <= 4 ? t.vo : t.val;
+    switch (t.type) { case 3: return g16(o); case 4: return g32(o); case 5: case 10: return rat(o); case 11: return dv.getFloat32(tiff+o, le); case 12: return dv.getFloat64(tiff+o, le); default: return null; } };
+  const ascii = t => t ? (t.count <= 4 ? str(tiff+t.vo, t.count) : str(tiff+t.val, t.count)).replace(/\0.*$/,"") : "";
+  const ifd0 = ifd(g32(4));
+  if (!ifd0[0x8825]) return null;
+  const gps = ifd(ifd0[0x8825].val);
+  if (!gps[2] || !gps[4]) return null;
+  const dms = t => rat(t.val) + rat(t.val+8)/60 + rat(t.val+16)/3600;
+  let lat = dms(gps[2]), lng = dms(gps[4]);
+  if (/S/i.test(ascii(gps[1]))) lat = -lat;
+  if (/W/i.test(ascii(gps[3]))) lng = -lng;
+  if (!lat && !lng) return null;
+  let taken = "";
+  if (ifd0[0x8769]) { const ex = ifd(ifd0[0x8769].val); taken = ascii(ex[0x9003]); }
+  if (!taken) taken = ascii(ifd0[0x0132]);
+  return { lat, lng, acc: numv(gps[0x1F]) || null, dir: numv(gps[0x11]), taken };
+}
+
+// Coordinates out of pasted text / Google & Apple Maps links. Returns {lat,lng} | {short:true} | null
+function parseLocationText(raw){
+  let s = String(raw || "").trim(); if (!s) return null;
+  try { s = decodeURIComponent(s.replace(/\+/g, " ")); } catch(e){}
+  const ok = (a,b) => isFinite(a) && isFinite(b) && Math.abs(a) <= 90 && Math.abs(b) <= 180 && !(a === 0 && b === 0);
+  const num = "(-?\\d{1,3}(?:\\.\\d+)?)";
+  const tries = [
+    new RegExp(`!3d${num}!4d${num}`),                                     // Google place pin (exact)
+    new RegExp(`[?&](?:q|query|ll|sll|daddr|destination|coordinate|center|address)=${num}\\s*,\\s*${num}`),
+    new RegExp(`/(?:place|search|dir)/${num}\\s*,\\s*${num}`),
+    new RegExp(`@${num},${num}`),                                         // Google map center
+  ];
+  for (const re of tries) { const m = s.match(re); if (m && ok(+m[1], +m[2])) return {lat:+m[1], lng:+m[2]}; }
+  // degrees-minutes-seconds:  35°12'34.5"N 79°27'10.2"W
+  const d = s.match(/(\d{1,2})\s*°\s*(\d{1,2})\s*['′’]\s*([\d.]+)\s*(?:["″”]|'')?\s*([NS])[\s,;]*(\d{1,3})\s*°\s*(\d{1,2})\s*['′’]\s*([\d.]+)\s*(?:["″”]|'')?\s*([EW])/i);
+  if (d) { let a = +d[1] + d[2]/60 + d[3]/3600, b = +d[5] + d[6]/60 + d[7]/3600; if (/S/i.test(d[4])) a=-a; if (/W/i.test(d[8])) b=-b; if (ok(a,b)) return {lat:a, lng:b}; }
+  // decimal with hemisphere letters:  35.1234° N, 79.5678° W
+  const h = s.match(/(\d{1,2}\.\d+)\s*°?\s*([NS])[\s,;]+(\d{1,3}\.\d+)\s*°?\s*([EW])/i);
+  if (h) { let a = +h[1], b = +h[3]; if (/S/i.test(h[2])) a=-a; if (/W/i.test(h[4])) b=-b; if (ok(a,b)) return {lat:a, lng:b}; }
+  // plain "lat, lng" anywhere
+  const p = s.match(/(-?\d{1,2}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)/) || s.match(/(-?\d{1,2}\.\d{3,})\s+(-?\d{1,3}\.\d{3,})/);
+  if (p && ok(+p[1], +p[2])) return {lat:+p[1], lng:+p[2]};
+  if (/(maps\.app\.goo\.gl|goo\.gl\/maps|maps\.apple\/p\/|apple\.co\/|g\.co\/kgs)/i.test(s)) return {short:true};
+  return null;
+}
+
+const foundLayer = L.layerGroup().addTo(map);
+const pinSvg = c => `<svg class="pin" viewBox="0 0 24 24"><path d="M12 23s8-7.6 8-13.5A8 8 0 0 0 4 9.5C4 15.4 12 23 12 23z" fill="${c}" stroke="#fff" stroke-width="2"/><circle cx="12" cy="9.5" r="3" fill="#fff"/></svg>`;
+function addPin(lat, lng, info){
+  info = info || {};
+  const m = L.marker([lat,lng], {icon:L.divIcon({className:"", html:pinSvg("#e53935"), iconSize:[0,0]})}).addTo(foundLayer);
+  const extras = [];
+  if (info.dir != null) {   // which way the camera was pointing (dashed line ~250 m)
+    const R = 6371008.8, br = info.dir*Math.PI/180, d = 250/R, la = lat*Math.PI/180, lo = lng*Math.PI/180;
+    const la2 = Math.asin(Math.sin(la)*Math.cos(d) + Math.cos(la)*Math.sin(d)*Math.cos(br));
+    const lo2 = lo + Math.atan2(Math.sin(br)*Math.sin(d)*Math.cos(la), Math.cos(d) - Math.sin(la)*Math.sin(la2));
+    extras.push(L.polyline([[lat,lng],[la2*180/Math.PI, lo2*180/Math.PI]], {color:"#e53935", weight:3, dashArray:"6 6", interactive:false}).addTo(foundLayer));
+  }
+  if (info.acc) extras.push(L.circle([lat,lng], {radius:info.acc, color:"#e53935", weight:1, fillOpacity:.08, interactive:false}).addTo(foundLayer));
+  const el = document.createElement("div"); el.className = "pinpop";
+  el.innerHTML = (info.img ? `<img src="${info.img}" alt="" onerror="this.remove()">` : "")
+    + `<b>${esc(info.name || "Dropped pin")}</b><br>`
+    + (info.taken ? `Taken ${esc(info.taken.replace(/^(\d{4}):(\d\d):(\d\d)/, "$2/$3/$1"))}<br>` : "")
+    + `<span class="muted">${lat.toFixed(6)}, ${lng.toFixed(6)}${info.acc ? ` · ±${Math.round(info.acc)} m` : ""}${info.dir != null ? ` · facing ${Math.round(info.dir)}°` : ""}</span><br>`;
+  const b1 = document.createElement("button"); b1.className = "btn primary"; b1.textContent = "Start field here";
+  b1.onclick = () => { m.closePopup(); map.setView([lat,lng], Math.max(map.getZoom(), 18)); startDraw(null); };
+  const b2 = document.createElement("button"); b2.className = "btn"; b2.textContent = "Copy coords";
+  b2.onclick = async () => { try { await navigator.clipboard.writeText(`${lat.toFixed(6)}, ${lng.toFixed(6)}`); toast("Coordinates copied"); } catch(e){ toast(`${lat.toFixed(6)}, ${lng.toFixed(6)}`, 5000); } };
+  const b3 = document.createElement("button"); b3.className = "btn"; b3.textContent = "Remove";
+  b3.onclick = () => { foundLayer.removeLayer(m); extras.forEach(x => foundLayer.removeLayer(x)); };
+  el.append(b1, b2, b3);
+  m.bindPopup(el, {maxWidth:260});
+  return m;
+}
+function showPins(markers){
+  if (!markers.length) return;
+  if (markers.length === 1) { const ll = markers[0].getLatLng(); map.setView(ll, 18); setTimeout(() => markers[0].openPopup(), 350); }
+  else map.fitBounds(L.featureGroup(markers).getBounds(), {padding:[50,50], maxZoom:18});
+}
+async function findFromFiles(fileList){
+  const files = [...fileList]; const pins = [], none = [];
+  const boundaryFiles = files.filter(f => /\.(kml|geojson|json)$/i.test(f.name));
+  for (const f of boundaryFiles) importBoundaryText(await f.text());
+  for (const f of files) {
+    if (boundaryFiles.includes(f)) continue;
+    if (!/^image\//.test(f.type) && !/\.(jpe?g|heic|heif|tiff?)$/i.test(f.name)) { none.push(f.name + " (not a photo)"); continue; }
+    let g = null;
+    try { g = exifFromBuffer(await f.arrayBuffer()); } catch(e) { g = null; }
+    if (g) pins.push(addPin(g.lat, g.lng, {name:f.name, taken:g.taken, acc:g.acc, dir:g.dir, img:URL.createObjectURL(f)}));
+    else none.push(f.name);
+  }
+  if (pins.length) { closeSheets(); showPins(pins); }
+  const msg = (pins.length ? `Found ${pins.length} photo location${pins.length>1?"s":""}. ` : "")
+    + (none.length ? `No location data in: ${none.join(", ")}. The phone may have stripped it — ask them to send the original photo (email "actual size", AirDrop, or Google Photos/iCloud link), or ask for a dropped pin instead.` : "");
+  if (msg) { $("findMsg").textContent = msg; toast(msg, none.length ? 7000 : 3000); }
+}
+function findFromText(text){
+  const r = parseLocationText(text);
+  if (!r) { $("findMsg").textContent = "Couldn't find coordinates in that. Paste coordinates like 35.1234, -79.5678 or a full Google/Apple Maps link."; toast("No coordinates found in that text", 3500); return false; }
+  if (r.short) { $("findMsg").textContent = "That's a short share link, which can't be read directly. Open it, then copy the coordinates (or the full link from the address bar) and paste that here."; toast("Short link — open it and copy the coordinates instead", 5000); return false; }
+  const m = addPin(r.lat, r.lng, {name:"Dropped pin"}); closeSheets(); showPins([m]); $("findText").value = ""; $("findMsg").textContent = "";
+  return true;
+}
+$("btnFind").onclick = () => { $("findMsg").textContent = ""; openSheet("sheetFind"); setTimeout(() => $("findText").focus(), 250); };
+$("btnPickPhoto").onclick = () => $("filePhoto").click();
+$("filePhoto").onchange = e => { if (e.target.files.length) findFromFiles(e.target.files); e.target.value = ""; };
+$("btnFindGo").onclick = () => findFromText($("findText").value);
+$("findText").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); findFromText($("findText").value); } });
+$("btnClearPins").onclick = () => { foundLayer.clearLayers(); toast("Pins cleared"); };
+// drag & drop anywhere (computer)
+let dragDepth = 0;
+const hasDragData = e => e.dataTransfer && [...e.dataTransfer.types].some(t => t === "Files" || t === "text/uri-list" || t === "text/plain");
+document.addEventListener("dragenter", e => { if (!hasDragData(e)) return; e.preventDefault(); dragDepth++; $("dropOverlay").classList.add("on"); $("dropZone").classList.add("hover"); });
+document.addEventListener("dragover", e => { if (hasDragData(e)) e.preventDefault(); });
+document.addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; $("dropOverlay").classList.remove("on"); $("dropZone").classList.remove("hover"); } });
+document.addEventListener("drop", e => {
+  if (!e.dataTransfer) return; e.preventDefault(); dragDepth = 0; $("dropOverlay").classList.remove("on"); $("dropZone").classList.remove("hover");
+  if (e.dataTransfer.files && e.dataTransfer.files.length) { findFromFiles(e.dataTransfer.files); return; }
+  const t = e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain");
+  if (t) findFromText(t);
+});
+// paste a link / coordinates / photo anywhere that isn't a text box
+document.addEventListener("paste", e => {
+  const tgt = e.target; if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA")) return;
+  const cd = e.clipboardData; if (!cd) return;
+  if (cd.files && cd.files.length) { e.preventDefault(); findFromFiles(cd.files); return; }
+  const t = cd.getData("text"); if (t && parseLocationText(t)) { e.preventDefault(); findFromText(t); }
+});
 
 // ---------- sync (Google Apps Script) ----------
 function queue(id){ if (!outbox.includes(id)) outbox.push(id); saveLocal(); setDot(); sync(); }
@@ -695,7 +923,7 @@ setInterval(() => { if (!recording) sync(); }, 60000);
 window.addEventListener("online", () => sync());
 document.addEventListener("visibilitychange", () => { if (!document.hidden && !recording) sync(); });
 
-window.__sfm = {get fields(){return fields}, get editing(){return editing}, acresOf, onFix, map, toKML, toGeoJSON, toGeeCSV, sync, shp: async (b)=>Array.from(new Uint8Array(await toShapefileZip(live(), b).arrayBuffer()))};
+window.__sfm = {get fields(){return fields}, get editing(){return editing}, acresOf, onFix, map, toKML, toGeoJSON, toGeeCSV, sync, exifFromBuffer, parseLocationText, findFromFiles, findFromText, shp: async (b)=>Array.from(new Uint8Array(await toShapefileZip(live(), b).arrayBuffer()))};
 
 // ---------- boot ----------
 renderFields(); renderToolbar(); setDot(); sync();

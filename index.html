@@ -59,6 +59,8 @@
   .flabel:before{display:none}
   #toast{position:absolute;left:50%;bottom:90px;transform:translateX(-50%);z-index:1300;background:#222;color:#fff;padding:10px 14px;border-radius:10px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw;text-align:center}
   #toast.show{opacity:1}
+  .bigbtn{display:block;width:100%;margin-top:16px;border:0;border-radius:14px;padding:18px;font-size:19px;font-weight:700;background:var(--green2);color:#fff;cursor:pointer;font-family:inherit}
+  .bigbtn:disabled{opacity:.6}
   .dropzone{border:2px dashed #b9c9bd;border-radius:12px;padding:18px;text-align:center;background:#f6faf7}
   .dropzone.hover{background:#e3f1e7;border-color:var(--green2)}
   #dropOverlay{position:fixed;inset:0;z-index:1400;background:rgba(31,61,43,.55);display:none;align-items:center;justify-content:center;pointer-events:none}
@@ -112,7 +114,7 @@
   </div>
   <div class="actions">
     <button class="btn" id="btnZoomTo">Zoom to</button>
-    <button class="btn" id="btnExportOne">Export KML</button>
+    <button class="btn" id="btnExportOne">📤 Share field boundary</button>
     <button class="btn warn" id="btnDelete">Delete</button>
   </div>
 </div>
@@ -149,21 +151,8 @@
     <div><span class="muted">Ignore fixes worse than</span>
       <select id="sAcc"><option value="5">5 m</option><option value="10" selected>10 m</option><option value="15">15 m</option><option value="25">25 m</option></select></div>
   </div>
-  <label>Export / import</label>
-  <div class="actions">
-    <button class="btn" id="btnExportKml">All → KML</button>
-    <button class="btn" id="btnExportGeo">All → GeoJSON</button>
-    <button class="btn" id="btnExportCsv">All → CSV</button>
-  </div>
-  <div class="actions">
-    <button class="btn" id="btnExportShp">All → Shapefile (.zip)</button>
-    <button class="btn" id="btnExportGee">All → Earth Engine CSV</button>
-  </div>
-  <p class="muted" style="margin:6px 0 0">Earth Engine: Assets → New → Table upload → pick the Shapefile .zip or the Earth Engine CSV. The Shapefile also works in FieldView, QGIS and ArcGIS.</p>
-  <div class="actions">
-    <button class="btn" id="btnImport">Import KML / GeoJSON</button>
-    <input type="file" id="fileImport" accept=".kml,.geojson,.json,application/vnd.google-earth.kml+xml" style="display:none">
-  </div>
+  <label>Share</label>
+  <div class="actions"><button class="btn primary" id="btnMenuExport">📤 Share field boundaries</button></div>
   <label>Map</label>
   <div class="seg" id="labelsSeg"><button data-v="1" class="on">Roads &amp; labels on</button><button data-v="0">Off</button></div>
   <p class="muted" style="margin-top:14px">Imagery © Esri, Maxar, Earthstar Geographics. Acreage is geodesic (true ground area), shown in US acres. Phone GPS is typically ±3–5 m — trace on imagery for tighter lines and use GPS to confirm edges you can't see.</p>
@@ -193,6 +182,19 @@
   </details>
   <p class="muted">Tip: on a computer you can also drag a photo or link anywhere onto the map, or press Ctrl/⌘+V to paste a link. Pins are temporary (this device only) — they clear when you close the app.</p>
   <div class="actions"><button class="btn" id="btnClearPins">Clear pins</button></div>
+</div>
+
+<!-- Export -->
+<div class="sheet" id="sheetExport">
+  <h2>Share field boundaries <button class="x" data-close>×</button></h2>
+  <label>Which fields?</label>
+  <select id="exScope"></select>
+  <div class="muted" id="exCount" style="margin-top:6px"></div>
+  <div id="exNameRow" style="display:none"><label>Your name</label><input id="exName" placeholder="So the office knows who sent it"></div>
+  <button class="bigbtn" id="btnEmailOffice">📧 Email to the office</button>
+  <div class="muted" id="exTo" style="text-align:center;margin-top:6px"></div>
+  <button class="btn" id="btnShareOther" style="width:100%;margin-top:14px;box-shadow:none;border:1px solid var(--line)">Send another way…</button>
+  <p class="muted" id="exHint" style="margin-top:10px;text-align:center"></p>
 </div>
 
 <div id="dropOverlay"><div>Drop photo or map link to find it</div></div>
@@ -416,6 +418,7 @@ function renderToolbar(){
     add("📍", "", locateMe);
     add("+ New field", "primary", () => startDraw(null));
     add("Fields", "", () => { renderList(); openSheet("sheetList"); });
+    add("📤 Share", "", () => openExport());
   } else {
     const pts = editing.pts;
     if (recording) { add("■ Stop GPS", "rec", stopRecording); return; }
@@ -489,7 +492,7 @@ $("btnDelete").onclick = () => {
   queue(f.id); closeSheets(); if (mode === "draw") endDraw(); else renderFields(); toast("Field deleted");
 };
 $("btnZoomTo").onclick = () => { const p = polyById[formCtx.id]; if (p) map.fitBounds(p.getBounds(), {maxZoom:18, padding:[40,40]}); closeSheets(); };
-$("btnExportOne").onclick = () => { const f = fields.find(x => x.id === formCtx.id); download(`${slug(f.farm)}-${slug(f.field||"field")}.kml`, toKML([f]), "application/vnd.google-earth.kml+xml"); };
+$("btnExportOne").onclick = () => openExport("field:" + formCtx.id);
 
 
 // ---------- list ----------
@@ -534,7 +537,7 @@ $("labelsSeg").querySelectorAll("button").forEach(b => b.onclick = () => {
 });
 $("labelsSeg").querySelectorAll("button").forEach(x => x.classList.toggle("on", +x.dataset.v === settings.labels));
 
-// ---------- export / import ----------
+// ---------- export file builders ----------
 const slug = s => String(s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"") || "x";
 function download(name, text, type){
   const blob = new Blob([text], {type}); const a = document.createElement("a");
@@ -562,13 +565,6 @@ function toCSV(arr){
   const q = v => `"${String(v ?? "").replace(/"/g,'""')}"`;
   return ["farm,field,grass,status,acres,mapped_by,updated,notes,id"].concat(arr.map(f => [f.farm,f.field,f.grass,f.status,f.acres,f.mappedBy,new Date(f.updatedAt).toISOString(),f.notes,f.id].map(q).join(","))).join("\n");
 }
-// Earth Engine CSV: one row per field, geometry as a GeoJSON string in ".geo" (EE's own CSV convention)
-function toGeeCSV(arr){
-  const q = v => `"${String(v ?? "").replace(/"/g,'""')}"`;
-  return ["farm,field,grass,status,acres,mapped_by,updated,field_id,.geo"].concat(arr.map(f => [f.farm,f.field,f.grass,f.status,f.acres,f.mappedBy,new Date(f.updatedAt).toISOString().slice(0,10),f.id,
-    JSON.stringify({type:"Polygon", coordinates:[f.coords]})].map(q).join(","))).join("\n");
-}
-
 // ---- Shapefile writer (Polygon, WGS84) + minimal zip, no libraries ----
 const crcTable = (() => { const t = new Uint32Array(256); for (let n=0;n<256;n++){ let c=n; for (let k=0;k<8;k++) c = c&1 ? 0xEDB88320^(c>>>1) : c>>>1; t[n]=c>>>0; } return t; })();
 function crc32(u8){ let c = 0xFFFFFFFF; for (let i=0;i<u8.length;i++) c = crcTable[(c^u8[i])&0xFF]^(c>>>8); return (c^0xFFFFFFFF)>>>0; }
@@ -644,54 +640,96 @@ function toShapefileZip(arr, base){
 function downloadBlob(name, blob){ const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); }
 
 const stamp = () => new Date().toISOString().slice(0,10);
-$("btnExportShp").onclick = () => { const arr = live(); if (!arr.length) { toast("No fields to export"); return; } const base = `sod_fields_${stamp().replace(/-/g,"")}`; downloadBlob(base + ".zip", toShapefileZip(arr, base)); };
-$("btnExportGee").onclick = () => download(`sod-fields-ee-${stamp()}.csv`, toGeeCSV(live()), "text/csv");
-$("btnExportKml").onclick = () => download(`sod-fields-${stamp()}.kml`, toKML(live()), "application/vnd.google-earth.kml+xml");
-$("btnExportGeo").onclick = () => download(`sod-fields-${stamp()}.geojson`, toGeoJSON(live()), "application/geo+json");
-$("btnExportCsv").onclick = () => download(`sod-fields-${stamp()}.csv`, toCSV(live()), "text/csv");
-$("btnImport").onclick = () => $("fileImport").click();
-$("fileImport").onchange = async e => {
-  const file = e.target.files[0]; if (!file) return; const text = await file.text(); e.target.value = "";
-  importBoundaryText(text);
-};
-function importBoundaryText(text){
-  let polys = [];
-  try {
-    if (/^\s*</.test(text)) {
-      const doc = new DOMParser().parseFromString(text, "application/xml");
-      doc.querySelectorAll("Placemark").forEach(pm => {
-        const name = pm.querySelector("name")?.textContent || "";
-        const data = {}; pm.querySelectorAll("Data").forEach(d => data[d.getAttribute("name")] = d.querySelector("value")?.textContent || "");
-        pm.querySelectorAll("Polygon outerBoundaryIs coordinates, Polygon outerBoundaryIs LinearRing coordinates").forEach(c => {
-          const ring = c.textContent.trim().split(/\s+/).map(t => t.split(",").slice(0,2).map(Number)).filter(p => p.length===2 && !isNaN(p[0]));
-          if (ring.length >= 3) polys.push({ring, props:{farm:data.farm, field:data.field || name, grass:data.grass, status:data.status, notes:data.notes}});
-        });
-      });
-    } else {
-      const gj = JSON.parse(text);
-      const feats = gj.type === "FeatureCollection" ? gj.features : [gj];
-      feats.forEach(ft => {
-        const g = ft.geometry || ft; const p = ft.properties || {};
-        const rings = g.type === "Polygon" ? [g.coordinates[0]] : g.type === "MultiPolygon" ? g.coordinates.map(c => c[0]) : [];
-        rings.forEach(r => polys.push({ring:r.map(c=>[c[0],c[1]]), props:{farm:p.farm||p.Farm||p.FARM, field:p.field||p.name||p.Name, grass:p.grass||p.variety, status:p.status, notes:p.notes}}));
-      });
-    }
-  } catch(err){ toast("Couldn't read that file: " + err.message, 4000); return; }
-  const seen = new Set(live().map(f => JSON.stringify(f.coords)));
-  let n = 0;
-  polys.forEach(({ring, props}) => {
-    const r = ring.map(c => [round7(c[0]), round7(c[1])]);
-    if (r[0][0] !== r[r.length-1][0] || r[0][1] !== r[r.length-1][1]) r.push(r[0]);
-    if (seen.has(JSON.stringify(r))) return;
-    const pts = r.slice(0,-1).map(c => [c[1], c[0]]);
-    const rec = {id:uid(), createdAt:Date.now(), updatedAt:Date.now(), farm:props.farm||"Imported", field:props.field||"", grass:props.grass||"Other",
-      status:props.status||"In production", notes:props.notes||"", coords:r, acres:Math.round(acresOf(pts)*100)/100, mappedBy:settings.user||"", method:"Imported", deleted:false};
-    fields.push(rec); queue(rec.id); n++;
-  });
-  renderFields(); closeSheets();
-  if (n) { const b = L.featureGroup(Object.values(polyById)).getBounds(); if (b.isValid()) map.fitBounds(b, {maxZoom:17}); }
-  toast(n ? `Imported ${n} field${n>1?"s":""}` : "Nothing new to import");
+// ---------- export (one screen, plain choices; phones get the share sheet) ----------
+let exPreset = null;
+function exportScopes(){
+  const arr = live(), farms = [...new Set(arr.map(f => f.farm).filter(Boolean))].sort();
+  const opts = [{v:"all", t:`All fields (${arr.length})`}];
+  if (exPreset && exPreset.startsWith("field:")) { const f = fields.find(x => x.id === exPreset.slice(6)); if (f) opts.unshift({v:exPreset, t:`This field: ${f.field || "Field"} (${f.farm})`}); }
+  if (settings.user) { const n = arr.filter(f => f.mappedBy === settings.user).length; if (n) opts.push({v:"mine", t:`Fields I mapped (${n})`}); }
+  farms.forEach(fm => opts.push({v:"farm:"+fm, t:`${fm} (${arr.filter(f => f.farm === fm).length})`}));
+  return opts;
 }
+function scopeFields(v){
+  const arr = live();
+  if (v === "all") return arr;
+  if (v === "mine") return arr.filter(f => f.mappedBy === settings.user);
+  if (v.startsWith("farm:")) return arr.filter(f => f.farm === v.slice(5));
+  if (v.startsWith("field:")) return arr.filter(f => f.id === v.slice(6));
+  return arr;
+}
+function scopeName(v){
+  if (v === "all") return "All farms"; if (v === "mine") return (settings.user || "My") + " fields";
+  if (v.startsWith("farm:")) return v.slice(5);
+  if (v.startsWith("field:")) { const f = fields.find(x => x.id === v.slice(6)); return f ? `${f.farm} ${f.field || "Field"}` : "Field"; }
+  return "Fields";
+}
+const isPhone = () => window.matchMedia && matchMedia("(pointer:coarse)").matches;
+const emailReady = () => !!(settings.url && settings.emailTo);
+function openExport(preset){
+  if (!live().length) { toast("No fields to share yet"); return; }
+  exPreset = preset || null;
+  const sel = $("exScope"); sel.innerHTML = exportScopes().map(o => `<option value="${esc(o.v)}">${esc(o.t)}</option>`).join("");
+  sel.value = exPreset || "all"; updateExCount();
+  $("exNameRow").style.display = settings.user ? "none" : "";
+  $("exName").value = settings.user || "";
+  const email = emailReady();
+  $("btnEmailOffice").style.display = email ? "" : "none";
+  $("btnEmailOffice").disabled = false; $("btnEmailOffice").textContent = "📧 Email to the office";
+  $("exTo").textContent = email ? `Goes straight to ${settings.emailTo}` : "";
+  $("btnShareOther").textContent = email ? "Send another way…" : "📤 Share field boundaries";
+  $("btnShareOther").className = email ? "btn" : "bigbtn";
+  $("exHint").textContent = email ? "" : (isPhone() ? "Your phone's share menu opens — pick Mail or Messages." : "The file goes to your Downloads folder.");
+  openSheet("sheetExport");
+}
+function updateExCount(){ const a = scopeFields($("exScope").value); const ac = a.reduce((t,f)=>t+(f.acres||0),0); $("exCount").textContent = `${a.length} field${a.length===1?"":"s"} · ${fmtAc(ac)}`; }
+$("exScope").onchange = updateExCount;
+$("exName").onchange = () => { settings.user = $("exName").value.trim(); LS.set("settings", settings); };
+$("btnMenuExport").onclick = () => openExport();
+const cleanName = s => String(s).replace(/[\\/:*?"<>|]+/g, "").replace(/\s+/g, " ").trim().slice(0, 60);
+function buildPackage(){
+  const v = $("exScope").value, arr = scopeFields(v);
+  if (!arr.length) return null;
+  const who = ($("exName").value.trim() || settings.user || "").trim();
+  if (who && who !== settings.user) { settings.user = who; LS.set("settings", settings); }
+  const name = cleanName(`Field boundaries - ${scopeName(v)} - ${stamp()}`) + ".zip";
+  const blob = toShapefileZip(arr, "sod_fields_" + stamp().replace(/-/g, ""));
+  const tot = arr.reduce((t,f)=>t+(f.acres||0),0);
+  const subject = arr.length === 1 ? `Field boundary: ${arr[0].farm} - ${arr[0].field || "Field"} (${fmtAc(arr[0].acres)})` : `Field boundaries: ${scopeName(v)} (${arr.length} fields, ${fmtAc(tot)})`;
+  const lines = arr.map(f => { const c = turf.centroid(turf.polygon([f.coords])).geometry.coordinates;
+    return `- ${f.farm} - ${f.field || "Field"}: ${fmtAc(f.acres)}, ${f.grass}, ${f.status || ""}${f.mappedBy ? `, mapped by ${f.mappedBy}` : ""}\n  Map: https://www.google.com/maps?q=${c[1].toFixed(6)},${c[0].toFixed(6)}${f.notes ? `\n  Notes: ${f.notes}` : ""}`; });
+  const body = `${who ? who + " sent" : "Sent"} ${arr.length === 1 ? "a field boundary" : arr.length + " field boundaries"} from Sod Field Mapper.\n\n${lines.join("\n")}\n\nTotal: ${fmtAc(tot)}\nThe boundary file is attached.`;
+  return {name, blob, subject, body};
+}
+const blobToBase64 = blob => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1]); r.onerror = rej; r.readAsDataURL(blob); });
+$("btnEmailOffice").onclick = async () => {
+  const pkg = buildPackage(); if (!pkg) { toast("No fields in that selection"); return; }
+  const btn = $("btnEmailOffice"); btn.disabled = true; btn.textContent = "Sending…";
+  try {
+    if (outbox.length) await sync();   // make sure the office copy in the Sheet is current too
+    const r = await fetch(settings.url, {method:"POST", headers:{"Content-Type":"text/plain;charset=utf-8"},
+      body: JSON.stringify({key:settings.key, action:"email", filename:pkg.name, zipBase64: await blobToBase64(pkg.blob), subject:pkg.subject, body:pkg.body, from:settings.user||""})});
+    const j = await r.json(); if (j.error) throw new Error(j.error);
+    btn.textContent = "✓ Sent"; toast("Sent to the office ✓", 3500); setTimeout(closeSheets, 1200);
+  } catch(err) {
+    btn.disabled = false; btn.textContent = "📧 Try again";
+    $("exHint").textContent = !navigator.onLine ? "No signal right now. Try again when you have service, or tap “Send another way”." : (/failed to fetch|network|load failed/i.test(err.message) ? "Couldn't reach the office. Check your signal and tap Try again, or tap “Send another way”." : `Couldn't send: ${err.message}. Tap Try again, or tap “Send another way”.`);
+    toast("Didn't send — see message", 4000);
+  }
+};
+$("btnShareOther").onclick = async () => {
+  const pkg = buildPackage(); if (!pkg) { toast("No fields in that selection"); return; }
+  const file = new File([pkg.blob], pkg.name, {type:"application/zip"});
+  if (isPhone() && navigator.canShare) {
+    let can = false; try { can = navigator.canShare({files:[file]}); } catch(e){}
+    if (can) {
+      try { await navigator.share({files:[file], title:pkg.subject, text:pkg.body}); closeSheets(); return; }
+      catch(e){ if (e.name === "AbortError") return; }
+    }
+  }
+  downloadBlob(pkg.name, pkg.blob); closeSheets();
+  toast(isPhone() ? `Saved to your phone's Downloads: ${pkg.name}` : `Saved to Downloads: ${pkg.name}`, 5000);
+};
 
 // ---------- find a location: photo GPS (EXIF), map links, coordinates ----------
 // EXIF reader for JPEG and HEIC/HEIF (iPhone) — returns {lat,lng,acc,dir,taken} or null
@@ -830,10 +868,7 @@ function showPins(markers){
 }
 async function findFromFiles(fileList){
   const files = [...fileList]; const pins = [], none = [];
-  const boundaryFiles = files.filter(f => /\.(kml|geojson|json)$/i.test(f.name));
-  for (const f of boundaryFiles) importBoundaryText(await f.text());
   for (const f of files) {
-    if (boundaryFiles.includes(f)) continue;
     if (!/^image\//.test(f.type) && !/\.(jpe?g|heic|heif|tiff?)$/i.test(f.name)) { none.push(f.name + " (not a photo)"); continue; }
     let g = null;
     try { g = exifFromBuffer(await f.arrayBuffer()); } catch(e) { g = null; }
@@ -901,6 +936,7 @@ async function sync(verbose){
     // pull
     const r = await fetch(settings.url + (settings.url.includes("?") ? "&" : "?") + "key=" + encodeURIComponent(settings.key) + "&t=" + Date.now());
     const j = await r.json(); if (j.error) throw new Error(j.error);
+    if ("emailTo" in j && j.emailTo !== settings.emailTo) { settings.emailTo = j.emailTo || ""; LS.set("settings", settings); }
     const byId = new Map(fields.map(f => [f.id, f]));
     let changed = 0;
     for (const rf of j.fields || []) {
@@ -923,7 +959,7 @@ setInterval(() => { if (!recording) sync(); }, 60000);
 window.addEventListener("online", () => sync());
 document.addEventListener("visibilitychange", () => { if (!document.hidden && !recording) sync(); });
 
-window.__sfm = {get fields(){return fields}, get editing(){return editing}, acresOf, onFix, map, toKML, toGeoJSON, toGeeCSV, sync, exifFromBuffer, parseLocationText, findFromFiles, findFromText, shp: async (b)=>Array.from(new Uint8Array(await toShapefileZip(live(), b).arrayBuffer()))};
+window.__sfm = {get fields(){return fields}, get editing(){return editing}, acresOf, onFix, map, toKML, toGeoJSON, sync, openExport, scopeFields, get settings(){return settings}, exifFromBuffer, parseLocationText, findFromFiles, findFromText, shp: async (b)=>Array.from(new Uint8Array(await toShapefileZip(live(), b).arrayBuffer()))};
 
 // ---------- boot ----------
 renderFields(); renderToolbar(); setDot(); sync();

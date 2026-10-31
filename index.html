@@ -350,12 +350,13 @@ map.on("click", e => {
 });
 
 // ---------- GPS ----------
-let watchId = null, lastFix = null, recording = false, meMarker = null, accCircle = null, followMe = false;
+let watchId = null, lastFix = null, recording = false, meMarker = null, accCircle = null, followMe = false, centerOnNextFix = false, findTimer = null;
 function ensureGps(){
   if (watchId != null) return true;
   if (!navigator.geolocation) { toast("This browser has no GPS access"); return false; }
   watchId = navigator.geolocation.watchPosition(onFix, err => {
-    toast(err.code === 1 ? "Location permission denied — allow it in your browser settings" : "GPS error: " + err.message, 4000);
+    if (err.code === 3) return;   // timeout: the watch keeps trying on its own
+    toast(err.code === 1 ? "Location is turned off for this app — see Settings → Privacy & Security → Location Services → Safari Websites" : "GPS error: " + err.message, 6000);
   }, {enableHighAccuracy:true, maximumAge:0, timeout:20000});
   return true;
 }
@@ -366,7 +367,11 @@ function onFix(pos){
     meMarker = L.marker([lat,lng], {interactive:false, icon:L.divIcon({className:"", html:'<div class="me"></div>', iconSize:[0,0]})}).addTo(meLayer);
     accCircle = L.circle([lat,lng], {radius:accuracy, color:"#2a7cff", weight:1, fillOpacity:.1, interactive:false}).addTo(meLayer);
   } else { meMarker.setLatLng([lat,lng]); accCircle.setLatLng([lat,lng]).setRadius(accuracy); }
-  if (followMe) map.setView([lat,lng], Math.max(map.getZoom(), 17), {animate:false});
+  if (centerOnNextFix) {   // first fix after tapping 📍 — however long it took
+    centerOnNextFix = false; clearTimeout(findTimer);
+    map.setView([lat,lng], Math.max(map.getZoom(), 17));
+    toast(`Found you (±${Math.round(accuracy)} m)` + (accuracy > 50 ? " — rough. Check Precise Location is on, or step outside." : ""), 3500);
+  } else if (followMe) map.setView([lat,lng], Math.max(map.getZoom(), 17), {animate:false});
   if (editing) $("gpsInfo").textContent = `GPS ±${accuracy.toFixed(0)} m` + (accuracy > settings.acc ? " — too rough, waiting for better signal" : "");
   if (recording && editing && accuracy <= settings.acc) {
     const pts = editing.pts, last = pts[pts.length-1];
@@ -375,7 +380,13 @@ function onFix(pos){
   }
 }
 let rdT = 0; function renderDrawThrottled(){ const now = Date.now(); if (now - rdT > 700) { rdT = now; renderDraw(); } else updateDrawInfo(); }
-function locateMe(){ if (!ensureGps()) return; followMe = true; if (lastFix) map.setView([lastFix.lat,lastFix.lng], Math.max(map.getZoom(),17)); else toast("Finding you…"); setTimeout(()=>followMe=false, 4000); }
+function locateMe(){
+  if (!ensureGps()) return;
+  if (lastFix && Date.now() - lastFix.t < 30000) { map.setView([lastFix.lat,lastFix.lng], Math.max(map.getZoom(),17)); return; }
+  centerOnNextFix = true; toast("Finding you…", 15000);
+  clearTimeout(findTimer);
+  findTimer = setTimeout(() => { if (centerOnNextFix) toast("Still looking for GPS… this can take a minute indoors. Stepping outside helps.", 8000); }, 15000);
+}
 function startRecording(){
   if (!ensureGps()) return;
   snapshot(); recording = true; followMe = true; editing.sel = null; editing.usedGps = true;

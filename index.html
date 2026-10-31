@@ -639,7 +639,7 @@ function toShapefileZip(arr, base){
 }
 function downloadBlob(name, blob){ const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); }
 
-const stamp = () => new Date().toISOString().slice(0,10);
+const stamp = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };   // local date, not UTC
 // ---------- export (one screen, plain choices; phones get the share sheet) ----------
 let exPreset = null;
 function exportScopes(){
@@ -692,8 +692,10 @@ function buildPackage(){
   if (!arr.length) return null;
   const who = ($("exName").value.trim() || settings.user || "").trim();
   if (who && who !== settings.user) { settings.user = who; LS.set("settings", settings); }
-  const name = cleanName(`Field boundaries - ${scopeName(v)} - ${stamp()}`) + ".zip";
-  const blob = toShapefileZip(arr, "sod_fields_" + stamp().replace(/-/g, ""));
+  // zip name = inner file names, letters/numbers/underscores only (what FieldView accepted)
+  const base = (scopeName(v) + "_" + stamp().replace(/-/g, "")).replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 60) || ("sod_fields_" + stamp().replace(/-/g, ""));
+  const name = base + ".zip";
+  const blob = toShapefileZip(arr, base);
   const tot = arr.reduce((t,f)=>t+(f.acres||0),0);
   const subject = arr.length === 1 ? `Field boundary: ${arr[0].farm} - ${arr[0].field || "Field"} (${fmtAc(arr[0].acres)})` : `Field boundaries: ${scopeName(v)} (${arr.length} fields, ${fmtAc(tot)})`;
   const lines = arr.map(f => { const c = turf.centroid(turf.polygon([f.coords])).geometry.coordinates;
